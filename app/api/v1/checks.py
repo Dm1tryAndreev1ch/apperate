@@ -24,6 +24,18 @@ from app.services.webhook_service import webhook_service
 router = APIRouter()
 
 
+@router.get("", response_model=List[CheckInstanceResponse])
+async def list_checks(
+    skip: int = 0,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List all check instances."""
+    checks = await check_instance.get_multi(db, skip=skip, limit=limit)
+    return checks
+
+
 @router.post("", response_model=CheckInstanceResponse, status_code=status.HTTP_201_CREATED)
 async def create_check(
     check_data: CheckInstanceCreate,

@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 from fastapi import FastAPI, Depends
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -50,6 +51,28 @@ try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
 except Exception:
     pass  # Static directory might not exist in all environments
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Serve index.html at root."""
+    try:
+        from pathlib import Path
+        index_path = Path("static/index.html")
+        if index_path.exists():
+            return index_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return """
+    <html>
+        <head><title>Quality Control API</title></head>
+        <body>
+            <h1>Quality Control API</h1>
+            <p>API доступен на <a href="/docs">/docs</a></p>
+            <p><a href="/static/admin.html">Admin Panel</a> | <a href="/static/user.html">User Panel</a></p>
+        </body>
+    </html>
+    """
 
 # Include routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["auth"])
@@ -110,15 +133,4 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         health_status["status"] = "degraded"
     
     return health_status
-
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "docs": "/docs",
-        "redoc": "/redoc",
-    }
 

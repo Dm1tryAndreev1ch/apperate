@@ -3,8 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.dependencies import get_current_active_user
+from app.models.user import User
 from app.services.auth_service import AuthService
 from app.schemas.auth import TokenRequest, TokenResponse, RefreshTokenRequest, RefreshTokenResponse
+from app.schemas.user import UserResponse
 from app.core.exceptions import UnauthorizedError
 
 router = APIRouter()
@@ -39,4 +42,12 @@ async def refresh_token(
         return RefreshTokenResponse(**tokens)
     except UnauthorizedError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get current authenticated user information."""
+    return current_user
 

@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Production Quality Control API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    API_V1_PREFIX: str = "/api"
+    API_V1_PREFIX: str = "/api/v1"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/quality_control"
