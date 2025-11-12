@@ -1,0 +1,43 @@
+"""Report model."""
+from sqlalchemy import Column, String, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+import uuid
+from enum import Enum
+from app.database import Base
+
+
+class ReportFormat(str, Enum):
+    """Report format."""
+
+    PDF = "pdf"
+    HTML = "html"
+    JSON = "json"
+
+
+class ReportStatus(str, Enum):
+    """Report status."""
+
+    GENERATING = "GENERATING"
+    READY = "READY"
+    FAILED = "FAILED"
+
+
+class Report(Base):
+    """Report model."""
+
+    __tablename__ = "reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    check_instance_id = Column(UUID(as_uuid=True), ForeignKey("check_instances.id", ondelete="CASCADE"), nullable=False, index=True)
+    format = Column(SQLEnum(ReportFormat), nullable=False, index=True)
+    file_key = Column(String(512), nullable=True)  # S3 key
+    status = Column(SQLEnum(ReportStatus), default=ReportStatus.GENERATING, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    generated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    check_instance = relationship("CheckInstance", back_populates="reports")
+    tasks = relationship("TaskLocal", back_populates="report", cascade="all, delete-orphan")
+
