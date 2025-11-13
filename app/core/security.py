@@ -55,6 +55,13 @@ class Permission(str, Enum):
     INTEGRATION_VIEW = "integration.view"
     INTEGRATION_MANAGE = "integration.manage"
 
+    # Brigades
+    BRIGADE_VIEW = "brigade.view"
+    BRIGADE_CREATE = "brigade.create"
+    BRIGADE_UPDATE = "brigade.update"
+    BRIGADE_DELETE = "brigade.delete"
+    BRIGADE_SCORE_VIEW = "brigade.score.view"
+
 
 # Role definitions with permissions
 ROLE_PERMISSIONS = {
@@ -91,6 +98,11 @@ ROLE_PERMISSIONS = {
         Permission.AUDIT_VIEW,
         Permission.INTEGRATION_VIEW,
         Permission.INTEGRATION_MANAGE,
+        Permission.BRIGADE_VIEW,
+        Permission.BRIGADE_CREATE,
+        Permission.BRIGADE_UPDATE,
+        Permission.BRIGADE_DELETE,
+        Permission.BRIGADE_SCORE_VIEW,
     ],
     "inspector": [
         Permission.CHECKLIST_VIEW,
@@ -98,11 +110,24 @@ ROLE_PERMISSIONS = {
         Permission.TEMPLATE_VIEW,
         Permission.REPORT_VIEW,
         Permission.REPORT_DOWNLOAD,
+        Permission.SCHEDULE_VIEW,
+        Permission.BRIGADE_VIEW,
+        Permission.BRIGADE_SCORE_VIEW,
+    ],
+    "crew_leader": [
+        Permission.CHECKLIST_VIEW,
+        Permission.TEMPLATE_VIEW,
+        Permission.REPORT_VIEW,
+        Permission.REPORT_DOWNLOAD,
+        Permission.SCHEDULE_VIEW,
+        Permission.BRIGADE_VIEW,
+        Permission.BRIGADE_SCORE_VIEW,
     ],
     "viewer": [
         Permission.CHECKLIST_VIEW,
         Permission.TEMPLATE_VIEW,
         Permission.REPORT_VIEW,
+        Permission.BRIGADE_VIEW,
     ],
 }
 

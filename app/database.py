@@ -1,16 +1,32 @@
 """Database configuration and session management."""
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import StaticPool
+
 from app.config import settings
 
+
+engine_kwargs = {
+    "echo": settings.DATABASE_ECHO,
+    "pool_pre_ping": True,
+}
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update(
+        {
+            "poolclass": StaticPool,
+        }
+    )
+else:
+    engine_kwargs.update(
+        {
+            "pool_size": 10,
+            "max_overflow": 20,
+        }
+    )
+
 # Create async engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DATABASE_ECHO,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-)
+engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
 
 # Create async session factory
 AsyncSessionLocal = async_sessionmaker(

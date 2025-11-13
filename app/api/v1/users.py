@@ -27,7 +27,10 @@ async def list_users(
     
     result = await db.execute(
         select(User)
-        .options(selectinload(User.roles))
+        .options(
+            selectinload(User.roles),
+            selectinload(User.brigades),
+        )
         .offset(skip)
         .limit(limit)
     )

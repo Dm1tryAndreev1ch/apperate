@@ -65,6 +65,7 @@ class CheckInstanceBase(BaseModel):
     department_id: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     inspector_id: Optional[UUID] = None
+    brigade_id: Optional[UUID] = None
 
 
 class CheckInstanceCreate(CheckInstanceBase):

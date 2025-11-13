@@ -4,7 +4,7 @@ from app.integrations.bitrix import BitrixIntegration, BitrixMode
 from app.config import settings
 
 
-def test_bitrix_stub_mode():
+def test_bitrix_stub_mode(db_session):
     """Test Bitrix integration in stub mode."""
     # Ensure stub mode
     original_mode = settings.BITRIX_MODE
@@ -26,7 +26,7 @@ def test_bitrix_stub_mode():
     settings.BITRIX_MODE = original_mode
 
 
-def test_bitrix_stub_update_task():
+def test_bitrix_stub_update_task(db_session):
     """Test updating task in stub mode."""
     original_mode = settings.BITRIX_MODE
     settings.BITRIX_MODE = "stub"
@@ -44,7 +44,7 @@ def test_bitrix_stub_update_task():
     settings.BITRIX_MODE = original_mode
 
 
-def test_bitrix_stub_get_task():
+def test_bitrix_stub_get_task(db_session):
     """Test getting task in stub mode."""
     original_mode = settings.BITRIX_MODE
     settings.BITRIX_MODE = "stub"

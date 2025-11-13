@@ -11,7 +11,8 @@ from app.database import init_db, close_db, get_db
 from app.middleware.metrics import setup_metrics
 from app.middleware.audit import setup_audit_middleware
 from app.middleware.audit import AuditMiddleware
-from app.api.v1 import auth, templates, checks, reports, files, tasks, users, roles, schedules, webhooks, audit, integrations
+from app.api.v1 import auth, templates, checks, reports, files, tasks, users, roles, schedules, webhooks, audit, integrations, brigades, meta
+from app.routing.encrypted_route import EncryptedAPIRoute
 
 
 @asynccontextmanager
@@ -33,6 +34,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+app.router.route_class = EncryptedAPIRoute
 
 # CORS middleware
 app.add_middleware(
@@ -74,19 +76,53 @@ async def root():
     </html>
     """
 
+# Apply encrypted route wrapper to API routers
+for api_router in (
+    auth.router,
+    templates.router,
+    checks.router,
+    reports.router,
+    files.router,
+    tasks.router,
+    users.router,
+    roles.router,
+    schedules.router,
+    brigades.router,
+    webhooks.router,
+    audit.router,
+    integrations.router,
+):
+    api_router.route_class = EncryptedAPIRoute
+
 # Include routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["auth"])
-app.include_router(templates.router, prefix=f"{settings.API_V1_PREFIX}/templates", tags=["templates"])
+app.include_router(
+    templates.router, prefix=f"{settings.API_V1_PREFIX}/templates", tags=["templates"]
+)
 app.include_router(checks.router, prefix=f"{settings.API_V1_PREFIX}/checks", tags=["checks"])
-app.include_router(reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"])
+app.include_router(
+    reports.router, prefix=f"{settings.API_V1_PREFIX}/reports", tags=["reports"]
+)
 app.include_router(files.router, prefix=f"{settings.API_V1_PREFIX}/files", tags=["files"])
 app.include_router(tasks.router, prefix=f"{settings.API_V1_PREFIX}/tasks", tags=["tasks"])
 app.include_router(users.router, prefix=f"{settings.API_V1_PREFIX}/users", tags=["users"])
 app.include_router(roles.router, prefix=f"{settings.API_V1_PREFIX}/roles", tags=["roles"])
-app.include_router(schedules.router, prefix=f"{settings.API_V1_PREFIX}/schedules", tags=["schedules"])
-app.include_router(webhooks.router, prefix=f"{settings.API_V1_PREFIX}/webhooks", tags=["webhooks"])
+app.include_router(
+    schedules.router, prefix=f"{settings.API_V1_PREFIX}/schedules", tags=["schedules"]
+)
+app.include_router(
+    brigades.router, prefix=f"{settings.API_V1_PREFIX}/brigades", tags=["brigades"]
+)
+app.include_router(meta.router, prefix=f"{settings.API_V1_PREFIX}/meta", tags=["meta"])
+app.include_router(
+    webhooks.router, prefix=f"{settings.API_V1_PREFIX}/webhooks", tags=["webhooks"]
+)
 app.include_router(audit.router, prefix=f"{settings.API_V1_PREFIX}/audit", tags=["audit"])
-app.include_router(integrations.router, prefix=f"{settings.API_V1_PREFIX}/integrations", tags=["integrations"])
+app.include_router(
+    integrations.router,
+    prefix=f"{settings.API_V1_PREFIX}/integrations",
+    tags=["integrations"],
+)
 
 
 @app.get("/health")

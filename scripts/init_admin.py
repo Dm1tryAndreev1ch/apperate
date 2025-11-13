@@ -18,23 +18,45 @@ import bcrypt
 async def init_admin():
     """Create admin role and user if they don't exist."""
     async with AsyncSessionLocal() as db:
-        # Check if admin role exists
-        result = await db.execute(select(Role).where(Role.name == "admin"))
-        admin_role = result.scalar_one_or_none()
+        created_roles = []
+        role_cache = {}
 
-        if not admin_role:
-            # Create admin role
-            admin_role = Role(
-                name="admin",
-                permissions=[p.value for p in ROLE_PERMISSIONS["admin"]],
-                description="Administrator with full access",
-            )
-            db.add(admin_role)
-            await db.commit()
-            await db.refresh(admin_role)
-            print("✓ Admin role created")
+        for role_name, permissions in ROLE_PERMISSIONS.items():
+            result = await db.execute(select(Role).where(Role.name == role_name))
+            role_obj = result.scalar_one_or_none()
+
+            if not role_obj:
+                role_obj = Role(
+                    name=role_name,
+                    permissions=[p.value for p in permissions],
+                    description={
+                        "admin": "Administrator with full access",
+                        "inspector": "Inspector responsible for performing checks",
+                        "crew_leader": "Crew leader overseeing brigade performance",
+                        "viewer": "Read-only access",
+                    }.get(role_name, f"Default role: {role_name}"),
+                )
+                db.add(role_obj)
+                await db.commit()
+                await db.refresh(role_obj)
+                created_roles.append(role_name)
+            else:
+                # Ensure permissions stay in sync with definitions
+                current_permissions = set(role_obj.permissions or [])
+                desired_permissions = {p.value for p in permissions}
+                if current_permissions != desired_permissions:
+                    role_obj.permissions = list(desired_permissions)
+                    db.add(role_obj)
+                    await db.commit()
+                    await db.refresh(role_obj)
+                    print(f"✓ Updated permissions for role '{role_name}'")
+
+            role_cache[role_name] = role_obj
+
+        if created_roles:
+            print("✓ Created roles:", ", ".join(created_roles))
         else:
-            print("✓ Admin role already exists")
+            print("✓ All default roles already exist")
 
         # Check if admin user exists
         result = await db.execute(select(User).where(User.email == "admin@example.com"))
@@ -52,7 +74,7 @@ async def init_admin():
                 full_name="Administrator",
                 is_active=True,
             )
-            admin_user.roles = [admin_role]
+            admin_user.roles = [role_cache["admin"]]
             db.add(admin_user)
             await db.commit()
             await db.refresh(admin_user)

@@ -1,5 +1,6 @@
 """Checklist service for versioning and validation."""
 from typing import Any, Dict, List
+from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.checklist import ChecklistTemplate, ChecklistTemplateVersion, CheckInstance
@@ -23,12 +24,14 @@ class ChecklistService:
         diff = {"old": old_schema, "new": new_schema}
 
         # Create version record
+        creator = UUID(created_by) if isinstance(created_by, str) else created_by
+
         version = ChecklistTemplateVersion(
             template_id=template_obj.id,
             version=template_obj.version + 1,
             schema=new_schema,
             diff=diff,
-            created_by=created_by,
+            created_by=creator,
         )
         db.add(version)
 
@@ -111,6 +114,54 @@ class ChecklistService:
                     })
 
         return violations
+
+    @staticmethod
+    def calculate_score(template_schema: Dict[str, Any], answers: Dict[str, Any]) -> float:
+        """Calculate a simple score based on answered questions.
+
+        Each question is worth 1 point by default or `meta.points` if provided.
+        Boolean questions score when True, single_choice when answer equals 'ok' or 'yes',
+        numeric questions add the numeric value.
+        """
+        total_points = 0.0
+        earned_points = 0.0
+
+        if not template_schema:
+            return earned_points
+
+        question_meta = {}
+        for section in template_schema.get("sections", []):
+            for question in section.get("questions", []):
+                question_meta[question.get("id")] = question
+
+        for question_id, answer in answers.items():
+            meta = question_meta.get(question_id)
+            if not meta:
+                continue
+            points = float(meta.get("meta", {}).get("points", 1))
+            total_points += points
+            q_type = meta.get("type")
+
+            if q_type == "boolean":
+                if answer is True:
+                    earned_points += points
+            elif q_type in {"single_choice", "select"}:
+                if isinstance(answer, str) and answer.lower() in {"ok", "yes", "true"}:
+                    earned_points += points
+            elif q_type == "number":
+                try:
+                    earned_points += float(answer)
+                    total_points += 0  # numeric answers considered absolute values
+                except (TypeError, ValueError):
+                    continue
+            else:
+                # For text or other types, count non-empty as success
+                if answer not in (None, "", []):
+                    earned_points += points
+
+        if total_points == 0:
+            return earned_points
+        return round((earned_points / total_points) * 100, 2)
 
 
 checklist_service = ChecklistService()

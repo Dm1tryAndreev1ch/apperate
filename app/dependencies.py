@@ -1,16 +1,19 @@
 """FastAPI dependencies for authentication and authorization."""
 from typing import Optional
+from uuid import UUID
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from app.core.exceptions import ForbiddenError, UnauthorizedError
+from app.core.security import Permission
 from app.database import get_db
 from app.models.user import User
-from app.utils.security import decode_token
 from app.utils.permissions import has_permission
-from app.core.security import Permission
-from app.core.exceptions import UnauthorizedError, ForbiddenError
+from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -32,10 +35,15 @@ async def get_current_user(
     except ValueError:
         raise credentials_exception
 
+    try:
+        user_uuid = UUID(user_id)
+    except (ValueError, TypeError):
+        raise credentials_exception
+
     # Get user from database with roles loaded
     result = await db.execute(
         select(User)
-        .where(User.id == user_id)
+        .where(User.id == user_uuid)
         .options(selectinload(User.roles))
     )
     user = result.scalar_one_or_none()

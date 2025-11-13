@@ -1,10 +1,10 @@
 """Task model."""
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 from app.database import Base
+from app.db.types import GUID
 
 
 class TaskLocal(Base):
@@ -12,8 +12,8 @@ class TaskLocal(Base):
 
     __tablename__ = "task_local"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    report_id = Column(UUID(as_uuid=True), ForeignKey("reports.id", ondelete="CASCADE"), nullable=True, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    report_id = Column(GUID(), ForeignKey("reports.id", ondelete="CASCADE"), nullable=True, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default="PENDING", index=True)

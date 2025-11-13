@@ -1,5 +1,5 @@
 """Report schemas."""
-from typing import Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 from datetime import datetime
@@ -37,4 +37,20 @@ class ReportDownloadResponse(BaseModel):
 
     download_url: str
     expires_in: int
+
+
+class TimeSeriesPoint(BaseModel):
+    """Generic time series point."""
+
+    label: str
+    value: float
+
+
+class ReportAnalyticsResponse(BaseModel):
+    """Aggregated analytics for dashboards."""
+
+    by_status: Dict[str, int]
+    by_format: Dict[str, int]
+    checks_completed: List[TimeSeriesPoint]
+    brigade_scores: List[TimeSeriesPoint]
 

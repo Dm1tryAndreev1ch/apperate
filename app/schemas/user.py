@@ -3,6 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
+from app.schemas.brigade import BrigadeSummary
 
 
 class RoleBase(BaseModel):
@@ -59,6 +60,7 @@ class UserResponse(UserBase):
 
     id: UUID
     roles: List[RoleResponse] = []
+    brigades: List[BrigadeSummary] = []
     created_at: datetime
     updated_at: datetime
 

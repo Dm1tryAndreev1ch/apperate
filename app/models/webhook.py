@@ -1,10 +1,10 @@
 """Webhook subscription model."""
 from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
 from enum import Enum
 from app.database import Base
+from app.db.types import GUID
 
 
 class WebhookEvent(str, Enum):
@@ -21,7 +21,7 @@ class WebhookSubscription(Base):
 
     __tablename__ = "webhook_subscriptions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     event = Column(SQLEnum(WebhookEvent), nullable=False, index=True)
     url = Column(String(512), nullable=False)
     secret = Column(String(255), nullable=True)  # Secret for webhook signature

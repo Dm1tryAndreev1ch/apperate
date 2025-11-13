@@ -53,7 +53,12 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
         """Create a new record."""
-        obj_in_data = jsonable_encoder(obj_in)
+        if isinstance(obj_in, dict):
+            obj_in_data = obj_in
+        elif hasattr(obj_in, "model_dump"):
+            obj_in_data = obj_in.model_dump(exclude_unset=True, mode="python")
+        else:
+            obj_in_data = jsonable_encoder(obj_in)
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
         await db.commit()

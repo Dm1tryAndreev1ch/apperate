@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.checklist import CheckInstance, CheckStatus
 from app.core.security import Permission
 from app.crud.checklist import check_instance, template
+from app.crud.brigade import brigade_score
 from app.crud.report import report
 from app.crud.task import task
 from app.services.checklist_service import checklist_service
@@ -20,8 +21,9 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.tasks.reports import generate_report
 from app.tasks.bitrix import sync_task_to_bitrix
 from app.services.webhook_service import webhook_service
+from app.routing.encrypted_route import EncryptedAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=EncryptedAPIRoute)
 
 
 @router.get("", response_model=List[CheckInstanceResponse])
@@ -48,20 +50,22 @@ async def create_check(
     if not template_obj:
         raise NotFoundError("Template not found")
 
-    check_dict = check_data.dict()
-    check_dict["template_version"] = template_obj.version
-    check_dict["inspector_id"] = current_user.id
-    check_dict["status"] = CheckStatus.IN_PROGRESS
-    check_dict["started_at"] = datetime.utcnow()
+    payload = check_data.dict(exclude_unset=True)
+    payload["template_version"] = template_obj.version
+    payload["inspector_id"] = payload.get("inspector_id") or current_user.id
+    payload.setdefault("status", CheckStatus.IN_PROGRESS)
+    if payload.get("status") == CheckStatus.IN_PROGRESS and payload.get("started_at") is None:
+        payload["started_at"] = datetime.utcnow()
 
-    new_check = await check_instance.create(db, obj_in=check_data)
+    new_check = await check_instance.create(db, obj_in=payload)
     
     # Send webhook event (fire and forget)
     try:
         await webhook_service.send_check_created({
             "check_id": str(new_check.id),
             "template_id": str(check_data.template_id),
-            "inspector_id": str(current_user.id),
+            "inspector_id": str(payload["inspector_id"]),
+            "brigade_id": str(new_check.brigade_id) if new_check.brigade_id else None,
         })
     except Exception:
         pass  # Don't fail request if webhook fails
@@ -158,6 +162,21 @@ async def complete_check(
 
     await db.commit()
     await db.refresh(check_obj)
+
+    if check_obj.brigade_id and check_obj.finished_at:
+        score_value = checklist_service.calculate_score(template_obj.schema, check_obj.answers)
+        await brigade_score.upsert_score(
+            db,
+            brigade_id=check_obj.brigade_id,
+            score_date=check_obj.finished_at.date(),
+            score=score_value,
+            check_id=check_id,
+            details={
+                "check_id": str(check_id),
+                "score": score_value,
+                "finished_at": check_obj.finished_at.isoformat(),
+            },
+        )
 
     # Queue report generation
     generate_report.delay(str(new_report.id), formats=["pdf"])

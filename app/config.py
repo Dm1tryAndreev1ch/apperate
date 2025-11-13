@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ENCRYPTION_SECRET: Optional[str] = None
 
     # S3/MinIO
     S3_ENDPOINT_URL: Optional[str] = "http://localhost:9000"

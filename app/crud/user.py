@@ -23,7 +23,10 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         result = await db.execute(
             select(User)
             .where(User.id == id)
-            .options(selectinload(User.roles))
+            .options(
+                selectinload(User.roles),
+                selectinload(User.brigades),
+            )
         )
         return result.scalar_one_or_none()
 
@@ -48,7 +51,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         db.add(db_obj)
         await db.commit()
         await db.refresh(db_obj)
-        await db.refresh(db_obj, ["roles"])
+        await db.refresh(db_obj, ["roles", "brigades"])
         return db_obj
 
     async def update(
