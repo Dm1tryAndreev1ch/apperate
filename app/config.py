@@ -41,8 +41,8 @@ class Settings(BaseSettings):
 
     # Bitrix Integration
     BITRIX_MODE: str = "stub"  # stub or live
-    BITRIX_BASE_URL: Optional[str] = None
-    BITRIX_ACCESS_TOKEN: Optional[str] = None
+    BITRIX_BASE_URL: Optional[str] = "https://b24-ea941g.bitrix24.by/rest/1/mjxechzjvf5d8c4g/"
+    BITRIX_ACCESS_TOKEN: Optional[str] = None  # optional when using webhook-style authentication
     BITRIX_WEBHOOK_SECRET: Optional[str] = None
 
     # Logging

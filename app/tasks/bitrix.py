@@ -29,9 +29,11 @@ def sync_task_to_bitrix(self, task_id: str):
             # Prepare payload
             payload = {
                 "title": task_obj.title,
-                "description": task_obj.description,
-                "status": task_obj.status,
+                "description": task_obj.description or "",
+                "status": (task_obj.status or "PENDING").upper(),
             }
+            if task_obj.report_id:
+                payload["tags"] = [f"report:{task_obj.report_id}"]
 
             # Sync with Bitrix
             if task_obj.bitrix_id:

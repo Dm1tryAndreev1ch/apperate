@@ -11,7 +11,23 @@ from app.database import init_db, close_db, get_db
 from app.middleware.metrics import setup_metrics
 from app.middleware.audit import setup_audit_middleware
 from app.middleware.audit import AuditMiddleware
-from app.api.v1 import auth, templates, checks, reports, files, tasks, users, roles, schedules, webhooks, audit, integrations, brigades, meta
+from app.api.v1 import (
+    auth,
+    templates,
+    checks,
+    reports,
+    files,
+    tasks,
+    users,
+    roles,
+    schedules,
+    webhooks,
+    audit,
+    integrations,
+    brigades,
+    meta,
+    demo,
+)
 from app.routing.encrypted_route import EncryptedAPIRoute
 
 
@@ -91,6 +107,7 @@ for api_router in (
     webhooks.router,
     audit.router,
     integrations.router,
+    demo.router,
 ):
     api_router.route_class = EncryptedAPIRoute
 
@@ -114,6 +131,7 @@ app.include_router(
     brigades.router, prefix=f"{settings.API_V1_PREFIX}/brigades", tags=["brigades"]
 )
 app.include_router(meta.router, prefix=f"{settings.API_V1_PREFIX}/meta", tags=["meta"])
+app.include_router(demo.router, prefix=f"{settings.API_V1_PREFIX}/demo", tags=["demo"])
 app.include_router(
     webhooks.router, prefix=f"{settings.API_V1_PREFIX}/webhooks", tags=["webhooks"]
 )

@@ -65,6 +65,17 @@ class ScheduleResponse(ScheduleBase):
     class Config:
         from_attributes = True
 
+    @root_validator(pre=True)
+    def _ensure_defaults(cls, values):
+        """Provide safe fallbacks for legacy rows with missing fields."""
+        if values.get("last_inspector_index") is None:
+            values["last_inspector_index"] = 0
+        if values.get("last_brigade_index") is None:
+            values["last_brigade_index"] = 0
+        if values.get("timezone") in (None, ""):
+            values["timezone"] = "UTC"
+        return values
+
 
 class ScheduleTriggerRequest(BaseModel):
     """Payload for manual schedule triggering."""

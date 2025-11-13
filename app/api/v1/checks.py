@@ -55,7 +55,13 @@ async def create_check(
     payload["inspector_id"] = payload.get("inspector_id") or current_user.id
     payload.setdefault("status", CheckStatus.IN_PROGRESS)
     if payload.get("status") == CheckStatus.IN_PROGRESS and payload.get("started_at") is None:
-        payload["started_at"] = datetime.utcnow()
+        scheduled_at = payload.get("scheduled_at")
+        should_start_now = True
+        if isinstance(scheduled_at, datetime):
+            scheduled_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
+            should_start_now = scheduled_naive <= datetime.utcnow()
+        if should_start_now:
+            payload["started_at"] = datetime.utcnow()
 
     new_check = await check_instance.create(db, obj_in=payload)
     

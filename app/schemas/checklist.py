@@ -1,7 +1,7 @@
 """Checklist schemas."""
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from app.models.checklist import TemplateStatus, CheckStatus
 
@@ -77,7 +77,7 @@ class CheckInstanceCreate(CheckInstanceBase):
 class CheckInstanceUpdate(BaseModel):
     """Check instance update schema."""
 
-    answers: Optional[Dict[str, Any]] = None
+    answers: Optional[Union[Dict[str, Any], List[Any]]] = None
     comments: Optional[Dict[str, Any]] = None
     media_keys: Optional[List[str]] = None
     status: Optional[CheckStatus] = None
@@ -90,7 +90,7 @@ class CheckInstanceResponse(CheckInstanceBase):
     id: UUID
     template_version: int
     status: CheckStatus
-    answers: Dict[str, Any]
+    answers: Union[Dict[str, Any], List[Any]] = Field(default_factory=dict)
     comments: Optional[Dict[str, Any]] = None
     media_keys: Optional[List[str]] = None
     scheduled_at: Optional[datetime] = None

@@ -113,6 +113,11 @@ async def test_report_analytics_includes_brigade_scores(
     payload = response.json()
 
     assert "brigade_scores" in payload
+    assert "charts" in payload
     brigade_labels = [entry["label"] for entry in payload["brigade_scores"]]
     assert brigade.name in brigade_labels
+    assert "brigade_scores" in payload["charts"]
+    chart_payload = payload["charts"]["brigade_scores"]
+    assert chart_payload["kind"] == "bar"
+    assert chart_payload["image"].startswith("data:image/png;base64,")
 

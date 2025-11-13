@@ -8,6 +8,22 @@ from app.models.brigade import Brigade, BrigadeDailyScore
 from app.models.audit import AuditLog
 from app.models.webhook import WebhookSubscription
 from app.models.integration import BitrixCallLog
+from app.models.reporting import (
+    CalculationRunStatus,
+    CalculationRunType,
+    DataCalculationRun,
+    DataQualityIssue,
+    DataQualityIssueType,
+    DataQualitySeverity,
+    DailyChecklistMetric,
+    DepartmentHistoricalComparison,
+    DepartmentMonthlySummary,
+    EquipmentRegisterEntry,
+    EquipmentStatus,
+    EquipmentStatusSnapshot,
+    RemarkEntry,
+    RemarkSeverity,
+)
 
 __all__ = [
     "User",
@@ -23,4 +39,18 @@ __all__ = [
     "AuditLog",
     "WebhookSubscription",
     "BitrixCallLog",
+    "CalculationRunStatus",
+    "CalculationRunType",
+    "DataCalculationRun",
+    "DataQualityIssue",
+    "DataQualityIssueType",
+    "DataQualitySeverity",
+    "DailyChecklistMetric",
+    "DepartmentHistoricalComparison",
+    "DepartmentMonthlySummary",
+    "EquipmentRegisterEntry",
+    "EquipmentStatus",
+    "EquipmentStatusSnapshot",
+    "RemarkEntry",
+    "RemarkSeverity",
 ]

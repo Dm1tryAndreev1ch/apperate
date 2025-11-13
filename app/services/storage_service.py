@@ -1,7 +1,7 @@
 """Storage service for S3/MinIO operations."""
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 from typing import Optional
 from datetime import timedelta
 from app.config import settings
@@ -22,6 +22,30 @@ class StorageService:
             config=Config(signature_version="s3v4"),
         )
         self.bucket_name = settings.S3_BUCKET_NAME
+        self._ensure_bucket_exists()
+
+    def _ensure_bucket_exists(self) -> None:
+        """Ensure the target bucket exists, creating it if necessary."""
+        try:
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            if error_code not in {"404", "NoSuchBucket", "NotFound"}:
+                raise Exception(f"Error checking bucket: {str(exc)}") from exc
+
+            create_params = {"Bucket": self.bucket_name}
+            if settings.S3_REGION and settings.S3_REGION != "us-east-1":
+                create_params["CreateBucketConfiguration"] = {
+                    "LocationConstraint": settings.S3_REGION
+                }
+
+            try:
+                self.s3_client.create_bucket(**create_params)
+            except ClientError as create_exc:
+                create_error_code = create_exc.response.get("Error", {}).get("Code", "")
+                if create_error_code in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+                    return
+                raise Exception(f"Error creating bucket: {str(create_exc)}") from create_exc
 
     def generate_upload_url(
         self,
@@ -102,6 +126,13 @@ class StorageService:
             return True
         except ClientError:
             return False
+
+    def get_object(self, key: str):
+        """Retrieve an object from S3/MinIO."""
+        try:
+            return self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+        except (ClientError, BotoCoreError) as e:
+            raise Exception(f"Error downloading file: {str(e)}")
 
 
 # Global instance
