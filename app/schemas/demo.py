@@ -18,6 +18,7 @@ class DemoSeedResponse(BaseModel):
     created_reports: int
     created_scores: int
     already_populated: bool
+    external_base_url: str
 
 
 class DemoResetResponse(BaseModel):

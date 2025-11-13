@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.security import ROLE_PERMISSIONS
 from app.database import Base
 from app.models.brigade import Brigade, BrigadeDailyScore
@@ -25,6 +26,14 @@ from app.models.checklist import (
 )
 from app.models.report import Report, ReportFormat, ReportStatus
 from app.models.user import Role, User
+from app.services.bootstrap_service import (
+    DEFAULT_ADMIN_EMAIL,
+    DEFAULT_ADMIN_NAME,
+    DEFAULT_ADMIN_PASSWORD,
+    DEFAULT_ROLE_DESCRIPTIONS,
+    ensure_default_admin,
+    ensure_roles,
+)
 from app.services.auth_service import AuthService
 from app.services.storage_service import storage_service
 
@@ -66,19 +75,9 @@ class DemoDataResult:
             "created_reports": self.reports_created,
             "created_scores": self.scores_created,
             "already_populated": status == "skipped",
+            "external_base_url": settings.EXTERNAL_IP.rstrip("/"),
         }
 
-
-DEFAULT_ROLE_DESCRIPTIONS = {
-    "admin": "Administrator with full access",
-    "inspector": "Inspector responsible for performing checks",
-    "crew_leader": "Crew leader overseeing brigade performance",
-    "viewer": "Read-only access",
-}
-
-DEFAULT_ADMIN_EMAIL = "admin@example.com"
-DEFAULT_ADMIN_PASSWORD = "admin123"
-DEFAULT_ADMIN_NAME = "Administrator"
 
 RESET_IGNORE_TABLES = {"alembic_version"}
 
@@ -362,42 +361,6 @@ DEMO_CHECKS = [
 ]
 
 
-async def _ensure_roles(
-    db: AsyncSession,
-    *,
-    role_names: Iterable[str],
-) -> Dict[str, Role]:
-    """Make sure that the required roles exist and return them."""
-    created = False
-    for role_name in role_names:
-        result = await db.execute(select(Role).where(Role.name == role_name))
-        role_obj = result.scalar_one_or_none()
-        if role_obj:
-            continue
-
-        permissions = [
-            permission.value
-            for permission in ROLE_PERMISSIONS.get(role_name, [])
-        ]
-        role_obj = Role(
-            name=role_name,
-            permissions=permissions,
-            description=DEFAULT_ROLE_DESCRIPTIONS.get(role_name),
-        )
-        db.add(role_obj)
-        created = True
-
-    if created:
-        await db.commit()
-
-    role_map: Dict[str, Role] = {}
-    for role_name in role_names:
-        result = await db.execute(select(Role).where(Role.name == role_name))
-        role = result.scalar_one()
-        role_map[role_name] = role
-    return role_map
-
-
 async def _get_or_create_users(
     db: AsyncSession,
     *,
@@ -434,31 +397,6 @@ async def _get_or_create_users(
         await db.commit()
 
     return user_map, created_count
-
-
-async def _create_test_admin_user(
-    db: AsyncSession,
-    *,
-    admin_role: Role,
-    email: str = DEFAULT_ADMIN_EMAIL,
-    password: str = DEFAULT_ADMIN_PASSWORD,
-    full_name: str = DEFAULT_ADMIN_NAME,
-) -> User:
-    """Create the default test administrator account."""
-    if not admin_role:
-        raise ValueError("Admin role is required to create the default administrator.")
-
-    admin_user = User(
-        email=email,
-        password_hash=AuthService.hash_password(password),
-        full_name=full_name,
-        is_active=True,
-    )
-    admin_user.roles = [admin_role]
-    db.add(admin_user)
-    await db.commit()
-    await db.refresh(admin_user)
-    return admin_user
 
 
 async def _create_brigades(
@@ -739,7 +677,7 @@ async def generate_demo_data(db: AsyncSession, current_user: User) -> Dict[str, 
     counters = DemoDataResult()
 
     required_roles = {"inspector", "crew_leader", "viewer"}
-    role_map = await _ensure_roles(db, role_names=required_roles)
+    role_map = await ensure_roles(db, role_names=required_roles)
 
     user_map, counters.users_created = await _get_or_create_users(
         db, role_map=role_map
@@ -780,12 +718,12 @@ async def reset_project_to_clean_state(db: AsyncSession) -> Dict[str, Any]:
     await db.commit()
 
     role_names = set(ROLE_PERMISSIONS.keys())
-    role_map = await _ensure_roles(db, role_names=role_names)
+    role_map = await ensure_roles(db, role_names=role_names)
     admin_role = role_map.get("admin")
     if not admin_role:
         raise RuntimeError("Failed to initialize admin role during project reset.")
 
-    admin_user = await _create_test_admin_user(db, admin_role=admin_role)
+    admin_user = await ensure_default_admin(db, role_map=role_map)
 
     return {
         "status": "reset",

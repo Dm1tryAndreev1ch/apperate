@@ -4,6 +4,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import StaticPool
 
 from app.config import settings
+from app.core.security import ROLE_PERMISSIONS
 
 
 engine_kwargs = {
@@ -54,6 +55,12 @@ async def init_db() -> None:
     """Initialize database (create tables)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    from app.services.bootstrap_service import ensure_default_admin, ensure_roles
+
+    async with AsyncSessionLocal() as session:
+        await ensure_roles(session, role_names=ROLE_PERMISSIONS.keys())
+        await ensure_default_admin(session)
 
 
 async def close_db() -> None:

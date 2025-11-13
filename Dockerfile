@@ -44,6 +44,9 @@ COPY . .
 # Make sure scripts are executable
 ENV PATH=/root/.local/bin:$PATH
 
+# Default external IP (can be overridden via env vars)
+ENV EXTERNAL_IP=http://localhost:8000
+
 # Expose port
 EXPOSE 8000
 
