@@ -34,8 +34,16 @@ async def list_checks(
     current_user: User = Depends(get_current_active_user),
 ):
     """List all check instances."""
-    checks = await check_instance.get_multi(db, skip=skip, limit=limit)
-    return checks
+    try:
+        checks = await check_instance.get_multi(db, skip=skip, limit=limit)
+        return checks
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при получении списка чек-листов: {str(e)}"
+        )
 
 
 @router.post("", response_model=CheckInstanceResponse, status_code=status.HTTP_201_CREATED)
@@ -45,38 +53,53 @@ async def create_check(
     current_user: User = Depends(require_permission(Permission.CHECKLIST_CREATE)),
 ):
     """Create a new check instance."""
-    # Verify template exists
-    template_obj = await template.get(db, id=check_data.template_id)
-    if not template_obj:
-        raise NotFoundError("Template not found")
-
-    payload = check_data.dict(exclude_unset=True)
-    payload["template_version"] = template_obj.version
-    payload["inspector_id"] = payload.get("inspector_id") or current_user.id
-    payload.setdefault("status", CheckStatus.IN_PROGRESS)
-    if payload.get("status") == CheckStatus.IN_PROGRESS and payload.get("started_at") is None:
-        scheduled_at = payload.get("scheduled_at")
-        should_start_now = True
-        if isinstance(scheduled_at, datetime):
-            scheduled_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
-            should_start_now = scheduled_naive <= datetime.utcnow()
-        if should_start_now:
-            payload["started_at"] = datetime.utcnow()
-
-    new_check = await check_instance.create(db, obj_in=payload)
-    
-    # Send webhook event (fire and forget)
     try:
-        await webhook_service.send_check_created({
-            "check_id": str(new_check.id),
-            "template_id": str(check_data.template_id),
-            "inspector_id": str(payload["inspector_id"]),
-            "brigade_id": str(new_check.brigade_id) if new_check.brigade_id else None,
-        })
-    except Exception:
-        pass  # Don't fail request if webhook fails
-    
-    return new_check
+        # Verify template exists
+        template_obj = await template.get(db, id=check_data.template_id)
+        if not template_obj:
+            raise NotFoundError("Template not found")
+
+        if hasattr(check_data, "model_dump"):
+            payload = check_data.model_dump(exclude_unset=True, mode="python")
+        else:
+            payload = check_data.dict(exclude_unset=True)
+        payload["template_version"] = template_obj.version
+        payload["inspector_id"] = payload.get("inspector_id") or current_user.id
+        payload.setdefault("status", CheckStatus.IN_PROGRESS)
+        if payload.get("status") == CheckStatus.IN_PROGRESS and payload.get("started_at") is None:
+            scheduled_at = payload.get("scheduled_at")
+            should_start_now = True
+            if isinstance(scheduled_at, datetime):
+                scheduled_naive = scheduled_at.replace(tzinfo=None) if scheduled_at.tzinfo else scheduled_at
+                should_start_now = scheduled_naive <= datetime.utcnow()
+            if should_start_now:
+                payload["started_at"] = datetime.utcnow()
+
+        new_check = await check_instance.create(db, obj_in=payload)
+        
+        # Send webhook event (fire and forget)
+        try:
+            await webhook_service.send_check_created({
+                "check_id": str(new_check.id),
+                "template_id": str(check_data.template_id),
+                "inspector_id": str(payload["inspector_id"]),
+                "brigade_id": str(new_check.brigade_id) if new_check.brigade_id else None,
+            })
+        except Exception:
+            pass  # Don't fail request if webhook fails
+        
+        return new_check
+    except NotFoundError:
+        raise
+    except ValidationError:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при создании чек-листа: {str(e)}"
+        )
 
 
 @router.get("/{check_id}", response_model=CheckInstanceResponse)

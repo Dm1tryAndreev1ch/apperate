@@ -8,6 +8,20 @@ from app.models.brigade import Brigade, BrigadeDailyScore
 from app.models.audit import AuditLog
 from app.models.webhook import WebhookSubscription
 from app.models.integration import BitrixCallLog
+from app.models.inspection import (
+    InspectionMeeting,
+    MeetingStatus,
+    ReferencePhoto,
+    ViolationFollowUp,
+    InspectionConfirmation,
+)
+from app.models.notification import (
+    Notification,
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
+    NotificationPreference,
+)
 from app.models.reporting import (
     CalculationRunStatus,
     CalculationRunType,
@@ -21,8 +35,13 @@ from app.models.reporting import (
     EquipmentRegisterEntry,
     EquipmentStatus,
     EquipmentStatusSnapshot,
+    PeriodSummaryGranularity,
     RemarkEntry,
     RemarkSeverity,
+    ReportGenerationEvent,
+    ReportGenerationStatus,
+    ReportGenerationEventType,
+    ReportPeriodSummary,
 )
 
 __all__ = [
@@ -51,6 +70,21 @@ __all__ = [
     "EquipmentRegisterEntry",
     "EquipmentStatus",
     "EquipmentStatusSnapshot",
+    "PeriodSummaryGranularity",
     "RemarkEntry",
     "RemarkSeverity",
+    "ReportPeriodSummary",
+    "ReportGenerationEvent",
+    "ReportGenerationEventType",
+    "ReportGenerationStatus",
+    "InspectionMeeting",
+    "MeetingStatus",
+    "ReferencePhoto",
+    "ViolationFollowUp",
+    "InspectionConfirmation",
+    "Notification",
+    "NotificationChannel",
+    "NotificationStatus",
+    "NotificationType",
+    "NotificationPreference",
 ]

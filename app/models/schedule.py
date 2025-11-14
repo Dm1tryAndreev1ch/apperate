@@ -23,6 +23,7 @@ class Schedule(Base):
     last_inspector_index = Column(Integer, nullable=False, default=0)
     last_brigade_index = Column(Integer, nullable=False, default=0)
     auto_replace_on_absence = Column(Boolean, default=False, nullable=False)
+    accompanier_pool = Column(UUIDArray(), nullable=True)  # Array of eligible accompaniers
     timezone = Column(String(50), nullable=False, default="UTC")
     enabled = Column(Boolean, default=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

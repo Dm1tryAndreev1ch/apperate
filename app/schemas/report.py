@@ -1,18 +1,18 @@
 """Report schemas."""
 from datetime import date, datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.models.report import ReportFormat, ReportStatus
+from app.models.report import ReportFormatXLSX, ReportStatus
 
 
 class ReportBase(BaseModel):
     """Base report schema."""
 
     check_instance_id: UUID
-    format: ReportFormat
+    format: ReportFormatXLSX
 
 
 class ReportCreate(ReportBase):
@@ -29,6 +29,8 @@ class ReportResponse(ReportBase):
     status: ReportStatus
     created_at: datetime
     generated_by: Optional[UUID] = None
+    author_id: Optional[UUID] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True

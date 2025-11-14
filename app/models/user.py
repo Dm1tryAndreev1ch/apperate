@@ -11,6 +11,7 @@ from app.db.types import EncryptedString, JSONBType, GUID
 
 if TYPE_CHECKING:
     from app.models.brigade import Brigade
+    from app.models.report import Report
 
 # Association table for User-Role many-to-many relationship
 user_role_association = Table(
@@ -31,6 +32,10 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(EncryptedString(255), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    telegram_id = Column(String(100), nullable=True, unique=True, index=True)  # Telegram user ID
+    telegram_username = Column(String(100), nullable=True)  # Telegram username
+    phone_number = Column(EncryptedString(50), nullable=True)  # Phone number
+    contact_info = Column(JSONBType(), nullable=True, default=dict)  # Additional contact information
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -48,6 +53,14 @@ class User(Base):
         back_populates="leader",
         lazy="selectin",
     )
+    authored_reports = relationship(
+        "Report",
+        foreign_keys="Report.author_id",
+        back_populates="author",
+        lazy="selectin",
+    )
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    notification_preferences = relationship("NotificationPreference", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 
 class Role(Base):

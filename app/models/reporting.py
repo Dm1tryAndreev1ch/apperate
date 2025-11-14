@@ -309,4 +309,80 @@ class DepartmentHistoricalComparison(Base):
     calculation_run = relationship("DataCalculationRun", back_populates="yearly_comparisons")
 
 
+class PeriodSummaryGranularity(str, Enum):
+    """Supported period granularities for report summaries."""
+
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+
+
+class ReportPeriodSummary(Base):
+    """Precomputed aggregates for dashboards and Excel exports."""
+
+    __tablename__ = "report_period_summaries"
+    __table_args__ = (
+        UniqueConstraint(
+            "granularity",
+            "period_start",
+            "period_end",
+            "department_id",
+            "brigade_id",
+            "author_id",
+            name="uq_report_summary_scope",
+        ),
+    )
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    granularity = Column(SQLEnum(PeriodSummaryGranularity), nullable=False, index=True)
+    period_start = Column(Date, nullable=False, index=True)
+    period_end = Column(Date, nullable=False, index=True)
+    department_id = Column(String(255), nullable=True, index=True)
+    brigade_id = Column(GUID(), ForeignKey("brigades.id", ondelete="SET NULL"), nullable=True, index=True)
+    author_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    report_count = Column(Integer, nullable=False, default=0)
+    summary_metrics = Column(JSONBType(), nullable=False, default=dict)
+    delta_metrics = Column(JSONBType(), nullable=True, default=dict)
+    filters = Column(JSONBType(), nullable=True, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ReportGenerationEventType(str, Enum):
+    """Types of report generation events."""
+
+    MANUAL = "manual"
+    SCHEDULED = "scheduled"
+    RETRY = "retry"
+    ALERT = "alert"
+
+
+class ReportGenerationStatus(str, Enum):
+    """Status for report generation events."""
+
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class ReportGenerationEvent(Base):
+    """History of report generation attempts (manual or scheduled)."""
+
+    __tablename__ = "report_generation_events"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
+    report_id = Column(GUID(), ForeignKey("reports.id", ondelete="CASCADE"), nullable=True, index=True)
+    check_instance_id = Column(GUID(), ForeignKey("check_instances.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = Column(SQLEnum(ReportGenerationEventType), nullable=False, index=True)
+    status = Column(SQLEnum(ReportGenerationStatus), nullable=False, default=ReportGenerationStatus.PENDING, index=True)
+    triggered_by = Column(String(128), nullable=True)
+    payload = Column(JSONBType(), nullable=True, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    report = relationship("Report", back_populates="generation_events")
+    check_instance = relationship("CheckInstance")
+
 

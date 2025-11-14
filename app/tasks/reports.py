@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy import select
 from app.tasks.celery_app import celery_app
 from app.config import settings
-from app.models.report import Report, ReportStatus, ReportFormat
+from app.models.report import Report, ReportStatus, ReportFormatXLSX
 from app.models.checklist import CheckInstance
 from app.models.user import User
 from app.services.report_service import report_service
@@ -22,7 +22,7 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 def generate_report(self, report_id: str, formats: List[str] = None):
     """Generate report asynchronously."""
     if formats is None:
-        formats = ["pdf"]
+        formats = ["xlsx"]
 
     async def _generate():
         async with AsyncSessionLocal() as db:
@@ -56,7 +56,7 @@ def generate_report(self, report_id: str, formats: List[str] = None):
             try:
                 # Generate report for each format
                 for format_str in formats:
-                    format_enum = ReportFormat(format_str)
+                    format_enum = ReportFormatXLSX(format_str)
                     file_key = report_service.generate_and_upload(
                         check_instance,
                         template_obj.schema,
@@ -76,7 +76,7 @@ def generate_report(self, report_id: str, formats: List[str] = None):
                 await webhook_service.send_report_ready({
                     "report_id": report_id,
                     "check_instance_id": str(report_obj.check_instance_id),
-                    "format": format_str,
+                    "format": format_enum.value,
                     "file_key": file_key,
                 })
             except Exception as e:

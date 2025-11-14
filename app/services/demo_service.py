@@ -9,6 +9,8 @@ from decimal import Decimal
 from io import BytesIO
 from typing import Any, Dict, Iterable, List, Tuple
 
+from openpyxl import Workbook
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +26,7 @@ from app.models.checklist import (
     ChecklistTemplateVersion,
     TemplateStatus,
 )
-from app.models.report import Report, ReportFormat, ReportStatus
+from app.models.report import Report, ReportFormatXLSX, ReportStatus
 from app.models.user import Role, User
 from app.services.bootstrap_service import (
     DEFAULT_ADMIN_EMAIL,
@@ -296,7 +298,7 @@ DEMO_CHECKS = [
             "cleanliness": True,
             "equipment": "ok",
         },
-        "report_formats": ["json"],
+        "report_formats": ["xlsx"],
     },
     {
         "project_id": "DEMO-PROJECT-002",
@@ -328,7 +330,7 @@ DEMO_CHECKS = [
             "reports": True,
             "notes": "Проект принят без замечаний.",
         },
-        "report_formats": ["html", "json"],
+        "report_formats": ["xlsx"],
     },
     {
         "project_id": "DEMO-PROJECT-004",
@@ -346,7 +348,7 @@ DEMO_CHECKS = [
             "materials-zoned": True,
             "passages-clear": False,
         },
-        "report_formats": ["json"],
+        "report_formats": ["xlsx"],
     },
     {
         "project_id": "DEMO-PROJECT-005",
@@ -593,13 +595,15 @@ async def _create_checks_and_reports(
         created_checks += 1
 
         for fmt in payload["report_formats"]:
-            report_format = ReportFormat(fmt) if isinstance(fmt, str) else fmt
+            report_format = ReportFormatXLSX(fmt) if isinstance(fmt, str) else fmt
             report = Report(
                 check_instance_id=check.id,
                 format=report_format,
                 file_key=f"demo/{check.id}/{report_format.value}",
                 status=ReportStatus.READY,
                 generated_by=current_user.id,
+                author_id=current_user.id,
+                metadata={"source": "demo_seed"},
             )
             db.add(report)
             await db.flush()
@@ -621,56 +625,56 @@ async def _create_checks_and_reports(
 
 async def _ensure_report_file(report_obj: Report, check: CheckInstance) -> None:
     """Upload a placeholder file for demo reports if nothing exists yet."""
-    exists = await asyncio.to_thread(storage_service.file_exists, report_obj.file_key)
-    if exists:
-        return
+    try:
+        exists = await asyncio.to_thread(storage_service.file_exists, report_obj.file_key)
+        if exists:
+            return
+    except Exception as exc:
+        # If storage check fails, assume file doesn't exist and continue
+        print(f"[demo] Failed to check if report file exists {report_obj.file_key}: {exc}")
 
     content_type = "application/octet-stream"
-    payload_bytes = b"Demo report generated for showcase purposes."
+    buffer = BytesIO()
 
-    if report_obj.format == ReportFormat.JSON:
-        content_type = "application/json"
-        payload = {
-            "report_id": str(report_obj.id),
-            "check_id": str(check.id),
-            "project_id": check.project_id,
-            "brigade_id": str(check.brigade_id) if check.brigade_id is not None else None,
-            "status": check.status.value if isinstance(check.status, CheckStatus) else str(check.status),
-            "generated_at": datetime.utcnow().isoformat(),
-            "summary": "Автоматически сгенерированный отчет для демо-показа.",
-            "answers": check.answers,
-        }
-        payload_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-    elif report_obj.format == ReportFormat.HTML:
-        content_type = "text/html; charset=utf-8"
-        answers_html = "".join(
-            f"<li><strong>{key}:</strong> {value}</li>"
-            for key, value in (check.answers or {}).items()
+    try:
+        if report_obj.format == ReportFormatXLSX.XLSX:
+            content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Demo Summary"
+            ws["A1"] = "Демо отчет"
+            ws["B1"] = str(report_obj.id)
+            ws["A2"] = "Проект"
+            ws["B2"] = check.project_id or "—"
+            ws["A3"] = "Бригада"
+            ws["B3"] = str(check.brigade_id) if check.brigade_id else "—"
+            ws["A4"] = "Статус обхода"
+            ws["B4"] = check.status.value if isinstance(check.status, CheckStatus) else str(check.status)
+            ws["A5"] = "Сгенерирован"
+            ws["B5"] = datetime.utcnow().isoformat()
+            ws["A7"] = "Ответы"
+
+            row = 8
+            for key, value in (check.answers or {}).items():
+                ws[f"A{row}"] = key
+                ws[f"B{row}"] = str(value)
+                row += 1
+
+            wb.save(buffer)
+        else:
+            buffer.write(b"Demo report placeholder")
+
+        buffer.seek(0)
+        await asyncio.to_thread(
+            storage_service.upload_fileobj,
+            buffer,
+            report_obj.file_key,
+            content_type,
         )
-        payload_bytes = (
-            "<!doctype html>"
-            "<html lang='ru'><head><meta charset='utf-8'>"
-            "<title>Демо отчет</title>"
-            "<style>body{font-family:Arial,sans-serif;margin:32px;color:#111}h1{margin-top:0}"
-            "ul{padding-left:18px}</style>"
-            "</head><body>"
-            f"<h1>Демонстрационный отчет {report_obj.id}</h1>"
-            f"<p><strong>Проект:</strong> {check.project_id or '—'}</p>"
-            f"<p><strong>Статус обхода:</strong> {check.status}</p>"
-            "<h2>Ответы</h2>"
-            f"<ul>{answers_html or '<li>Ответы отсутствуют</li>'}</ul>"
-            "<p style='margin-top:32px;font-size:14px;color:#555'>Этот файл создан автоматически для демонстрации возможности скачивания отчетов.</p>"
-            "</body></html>"
-        ).encode("utf-8")
-
-    buffer = BytesIO(payload_bytes)
-    buffer.seek(0)
-    await asyncio.to_thread(
-        storage_service.upload_fileobj,
-        buffer,
-        report_obj.file_key,
-        content_type,
-    )
+    except Exception as exc:
+        # Log but don't fail - demo data generation should continue even if storage fails
+        print(f"[demo] Failed to upload report file {report_obj.file_key}: {exc}")
+        # Don't raise - allow demo data generation to continue without storage files
 
 async def generate_demo_data(db: AsyncSession, current_user: User) -> Dict[str, Any]:
     """Generate or reuse demo entities for showcasing the system."""
@@ -706,31 +710,22 @@ async def generate_demo_data(db: AsyncSession, current_user: User) -> Dict[str, 
 
 async def reset_project_to_clean_state(db: AsyncSession) -> Dict[str, Any]:
     """Wipe project data and recreate only the default administrator account."""
-    total_removed = 0
+    from app.services.reset_service import reset_service
 
-    for table in reversed(Base.metadata.sorted_tables):
-        if table.name in RESET_IGNORE_TABLES:
-            continue
-        result = await db.execute(table.delete())
-        rowcount = getattr(result, "rowcount", None)
-        if rowcount is not None and rowcount > 0:
-            total_removed += rowcount
-    await db.commit()
+    results = await reset_service.reset_project(db)
 
-    role_names = set(ROLE_PERMISSIONS.keys())
-    role_map = await ensure_roles(db, role_names=role_names)
-    admin_role = role_map.get("admin")
-    if not admin_role:
-        raise RuntimeError("Failed to initialize admin role during project reset.")
-
-    admin_user = await ensure_default_admin(db, role_map=role_map)
+    # Verify reset
+    verification = await reset_service.verify_reset(db)
 
     return {
         "status": "reset",
         "detail": "Создан чистый проект с тестовым администратором.",
-        "records_removed": total_removed,
-        "roles_seeded": len(role_map),
-        "admin_email": admin_user.email,
+        "tables_truncated": len(results.get("tables_truncated", [])),
+        "tables_preserved": len(results.get("tables_preserved", [])),
+        "admin_user_preserved": results.get("admin_user_preserved", False),
+        "admin_email": results.get("admin_email", DEFAULT_ADMIN_EMAIL),
         "admin_password": DEFAULT_ADMIN_PASSWORD,
+        "verification": verification,
+        "errors": results.get("errors", []),
     }
 

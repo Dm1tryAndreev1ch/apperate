@@ -1,7 +1,7 @@
 """Endpoints for generating demo data (test build)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Permission
@@ -23,8 +23,17 @@ async def create_test_build(
     db: AsyncSession = Depends(get_db),
 ) -> DemoSeedResponse:
     """Generate fake data for demo environments."""
-    payload = await generate_demo_data(db, current_user)
-    return DemoSeedResponse(**payload)
+    try:
+        payload = await generate_demo_data(db, current_user)
+        return DemoSeedResponse(**payload)
+    except Exception as e:
+        import traceback
+        error_detail = str(e)
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при создании демо-данных: {error_detail}"
+        )
 
 
 @router.post("/reset", response_model=DemoResetResponse)

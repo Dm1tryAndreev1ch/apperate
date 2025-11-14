@@ -1,5 +1,5 @@
 """Checklist models."""
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum as SQLEnum, Text, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -30,12 +30,14 @@ class ChecklistTemplate(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(255), nullable=False, index=True)
+    name_slug = Column(String(255), nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     version = Column(Integer, nullable=False, default=1)
     schema = Column(JSONBType(), nullable=False)  # Structure: sections → questions → {id, type, required, meta}
     status = Column(SQLEnum(TemplateStatus), default=TemplateStatus.ACTIVE, nullable=False, index=True)
     created_by = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_deleted = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     versions = relationship("ChecklistTemplateVersion", back_populates="template", cascade="all, delete-orphan")
@@ -73,6 +75,7 @@ class CheckInstance(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
     inspector_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    accompanier_id = Column(GUID(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)  # Accompanying person
     brigade_id = Column(GUID(), ForeignKey("brigades.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(SQLEnum(CheckStatus), default=CheckStatus.IN_PROGRESS, nullable=False, index=True)
     answers = Column(JSONBType(), nullable=False, default=dict)  # Answers to questions
@@ -83,6 +86,9 @@ class CheckInstance(Base):
     # Relationships
     template = relationship("ChecklistTemplate", back_populates="check_instances")
     inspector = relationship("User", foreign_keys=[inspector_id])
+    accompanier = relationship("User", foreign_keys=[accompanier_id])
     brigade = relationship("Brigade", back_populates="checks")
     reports = relationship("Report", back_populates="check_instance", cascade="all, delete-orphan")
+    meetings = relationship("InspectionMeeting", back_populates="check_instance", cascade="all, delete-orphan")
+    confirmation = relationship("InspectionConfirmation", back_populates="check_instance", uselist=False, cascade="all, delete-orphan")
 

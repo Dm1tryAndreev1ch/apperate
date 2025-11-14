@@ -6,7 +6,7 @@ from typing import Dict
 
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "ru": {
-        "app.title": "Система контроля качества",
+        "app.title": "MantaQC",
         "login.title": "Авторизация",
         "login.email": "Email",
         "login.email_placeholder": "admin@example.com",
@@ -81,7 +81,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "schedule.reason_placeholder": "Причина отказа...",
     },
     "en": {
-        "app.title": "Quality Control System",
+        "app.title": "MantaQC",
         "login.title": "Sign in",
         "login.email": "Email",
         "login.email_placeholder": "admin@example.com",

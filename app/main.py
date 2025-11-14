@@ -27,6 +27,7 @@ from app.api.v1 import (
     brigades,
     meta,
     demo,
+    dashboards,
 )
 from app.routing.encrypted_route import EncryptedAPIRoute
 
@@ -83,9 +84,9 @@ async def root():
         pass
     return """
     <html>
-        <head><title>Quality Control API</title></head>
+        <head><title>MantaQC API</title></head>
         <body>
-            <h1>Quality Control API</h1>
+            <h1>MantaQC API</h1>
             <p>API доступен на <a href="/docs">/docs</a></p>
             <p><a href="/static/admin.html">Admin Panel</a> | <a href="/static/user.html">User Panel</a></p>
         </body>
@@ -108,6 +109,7 @@ for api_router in (
     audit.router,
     integrations.router,
     demo.router,
+    dashboards.router,
 ):
     api_router.route_class = EncryptedAPIRoute
 
@@ -140,6 +142,11 @@ app.include_router(
     integrations.router,
     prefix=f"{settings.API_V1_PREFIX}/integrations",
     tags=["integrations"],
+)
+app.include_router(
+    dashboards.router,
+    prefix=f"{settings.API_V1_PREFIX}/dashboards",
+    tags=["dashboards"],
 )
 
 

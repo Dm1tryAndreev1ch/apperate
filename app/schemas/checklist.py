@@ -17,13 +17,14 @@ class ChecklistTemplateBase(BaseModel):
 class ChecklistTemplateCreate(ChecklistTemplateBase):
     """Checklist template creation schema."""
 
-    pass
+    name_slug: Optional[str] = None
 
 
 class ChecklistTemplateUpdate(BaseModel):
     """Checklist template update schema."""
 
     name: Optional[str] = None
+    name_slug: Optional[str] = None
     description: Optional[str] = None
     schema: Optional[Dict[str, Any]] = None
     status: Optional[TemplateStatus] = None
@@ -34,9 +35,11 @@ class ChecklistTemplateResponse(ChecklistTemplateBase):
 
     id: UUID
     version: int
+    name_slug: str
     status: TemplateStatus
     created_by: Optional[UUID] = None
     created_at: datetime
+    is_deleted: bool
 
     class Config:
         from_attributes = True
