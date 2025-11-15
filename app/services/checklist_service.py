@@ -1,11 +1,12 @@
 """Checklist service for versioning and validation."""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.checklist import ChecklistTemplate, ChecklistTemplateVersion, CheckInstance
 from app.models.checklist import CheckStatus
 from app.crud.checklist import template, check_instance
+from app.localization.helpers import get_translation
 
 
 class ChecklistService:
@@ -45,7 +46,11 @@ class ChecklistService:
         return version
 
     @staticmethod
-    def validate_answers(template_schema: Dict[str, Any], answers: Dict[str, Any]) -> tuple[bool, List[str]]:
+    def validate_answers(
+        template_schema: Dict[str, Any],
+        answers: Dict[str, Any],
+        locale: str = "en"
+    ) -> tuple[bool, List[str]]:
         """Validate answers against template schema."""
         errors = []
 
@@ -58,7 +63,7 @@ class ChecklistService:
         # Validate each answer
         for question_id, answer in answers.items():
             if question_id not in questions:
-                errors.append(f"Unknown question ID: {question_id}")
+                errors.append(get_translation("errors.unknown_question_id", locale, question_id=question_id))
                 continue
 
             question = questions[question_id]
@@ -67,14 +72,14 @@ class ChecklistService:
 
             # Check required
             if required and (answer is None or answer == ""):
-                errors.append(f"Required question {question_id} is missing")
+                errors.append(get_translation("errors.required_question_missing", locale, question_id=question_id))
 
             # Type validation (simplified)
             if answer is not None and answer != "":
                 if question_type == "number" and not isinstance(answer, (int, float)):
-                    errors.append(f"Question {question_id} must be a number")
+                    errors.append(get_translation("errors.question_must_be_number", locale, question_id=question_id))
                 elif question_type == "boolean" and not isinstance(answer, bool):
-                    errors.append(f"Question {question_id} must be a boolean")
+                    errors.append(get_translation("errors.question_must_be_boolean", locale, question_id=question_id))
 
         return len(errors) == 0, errors
 

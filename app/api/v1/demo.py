@@ -1,7 +1,7 @@
 """Endpoints for generating demo data (test build)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import Permission
@@ -13,18 +13,21 @@ from app.services.demo_service import (
     generate_demo_data,
     reset_project_to_clean_state,
 )
+from app.localization.helpers import get_locale_from_request, get_translation
 
 router = APIRouter()
 
 
 @router.post("/test-build", response_model=DemoSeedResponse)
 async def create_test_build(
+    request: Request = None,
     current_user: User = Depends(require_permission(Permission.USER_CREATE)),
     db: AsyncSession = Depends(get_db),
 ) -> DemoSeedResponse:
     """Generate fake data for demo environments."""
+    locale = get_locale_from_request(request) if request else "en"
     try:
-        payload = await generate_demo_data(db, current_user)
+        payload = await generate_demo_data(db, current_user, locale=locale)
         return DemoSeedResponse(**payload)
     except Exception as e:
         import traceback
@@ -32,7 +35,7 @@ async def create_test_build(
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Ошибка при создании демо-данных: {error_detail}"
+            detail=get_translation("errors.demo_create_failed", locale, detail=error_detail)
         )
 
 

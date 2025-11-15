@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import get_current_active_user
 from app.localization.translations import TRANSLATIONS, get_available_locales
+from app.localization.helpers import get_translation
 from app.models.user import User
 
 router = APIRouter()
@@ -28,9 +29,11 @@ async def translations(
     """Return translation bundle for locale."""
     bundle = TRANSLATIONS.get(locale.lower())
     if not bundle:
+        # Use default locale for error message
+        default_locale = "en"
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Locale '{locale}' not supported",
+            detail=get_translation("errors.locale_not_supported", default_locale, locale=locale),
         )
     return bundle
 

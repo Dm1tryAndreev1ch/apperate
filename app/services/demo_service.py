@@ -27,7 +27,18 @@ from app.models.checklist import (
     TemplateStatus,
 )
 from app.models.report import Report, ReportFormatXLSX, ReportStatus
+from app.models.reporting import (
+    PeriodSummaryGranularity,
+    ReportGenerationEvent,
+    ReportGenerationEventType,
+    ReportGenerationStatus,
+    ReportPeriodSummary,
+    RemarkEntry,
+    RemarkSeverity,
+)
+from app.models.schedule import Schedule
 from app.models.user import Role, User
+from app.models.webhook import WebhookEvent, WebhookSubscription
 from app.services.bootstrap_service import (
     DEFAULT_ADMIN_EMAIL,
     DEFAULT_ADMIN_NAME,
@@ -51,8 +62,10 @@ class DemoDataResult:
     reports_created: int = 0
     scores_created: int = 0
 
-    def as_payload(self) -> Dict[str, Any]:
+    def as_payload(self, locale: str = "en") -> Dict[str, Any]:
         """Convert counters to response payload."""
+        from app.localization.helpers import get_translation
+        
         total = (
             self.users_created
             + self.brigades_created
@@ -63,9 +76,9 @@ class DemoDataResult:
         )
         status = "skipped" if total == 0 else "created"
         detail = (
-            "Демо-данные уже доступны"
+            get_translation("demo.data_already_available", locale)
             if status == "skipped"
-            else "Созданы демонстрационные данные"
+            else get_translation("demo.data_created", locale)
         )
         return {
             "status": status,
@@ -91,8 +104,20 @@ DEMO_USERS = [
         "role": "inspector",
     },
     {
+        "email": "demo.inspector2@example.com",
+        "full_name": "Демо Инспектор 2",
+        "password": "demo123!",
+        "role": "inspector",
+    },
+    {
         "email": "demo.lead@example.com",
         "full_name": "Демо Руководитель",
+        "password": "demo123!",
+        "role": "crew_leader",
+    },
+    {
+        "email": "demo.lead2@example.com",
+        "full_name": "Демо Руководитель 2",
         "password": "demo123!",
         "role": "crew_leader",
     },
@@ -101,6 +126,12 @@ DEMO_USERS = [
         "full_name": "Демо Наблюдатель",
         "password": "demo123!",
         "role": "viewer",
+    },
+    {
+        "email": "demo.manager@example.com",
+        "full_name": "Демо Менеджер",
+        "password": "demo123!",
+        "role": "admin",
     },
 ]
 
@@ -124,6 +155,26 @@ DEMO_BRIGADES = [
                 "demo.viewer@example.com",
             ],
             "profile": {"project": "Project Atlas", "shift": "B"},
+        },
+        {
+            "name": "Demo Brigade Gamma",
+            "description": "Бригада по техническому обслуживанию",
+            "leader": "demo.lead2@example.com",
+            "members": [
+                "demo.lead2@example.com",
+                "demo.inspector2@example.com",
+            ],
+            "profile": {"project": "Project Titan", "shift": "C"},
+        },
+        {
+            "name": "Demo Brigade Delta",
+            "description": "Бригада по упаковке и логистике",
+            "leader": "demo.inspector2@example.com",
+            "members": [
+                "demo.inspector2@example.com",
+                "demo.inspector@example.com",
+            ],
+            "profile": {"project": "Project Mercury", "shift": "A"},
         },
     ]
 
@@ -360,6 +411,75 @@ DEMO_CHECKS = [
         "answers": {},
         "report_formats": [],
     },
+    {
+        "project_id": "DEMO-PROJECT-006",
+        "template": "Demo Template: Safety Walk",
+        "brigade": "Demo Brigade Gamma",
+        "inspector": "demo.inspector2@example.com",
+        "status": CheckStatus.COMPLETED,
+        "started_offset": {"days": 7, "hours": 2},
+        "duration_hours": 1.5,
+        "answers": {
+            "safety-gear": True,
+            "hazards": "Все в порядке",
+            "cleanliness": True,
+            "equipment": "ok",
+        },
+        "report_formats": ["xlsx"],
+    },
+    {
+        "project_id": "DEMO-PROJECT-007",
+        "template": "Demo Template: Final Inspection",
+        "brigade": "Demo Brigade Delta",
+        "inspector": "demo.lead2@example.com",
+        "status": CheckStatus.COMPLETED,
+        "started_offset": {"days": 4, "hours": 8},
+        "duration_hours": 2.5,
+        "answers": {
+            "finish-quality": False,
+            "photos": ["minio://quality-control/demo/final/delta.jpg"],
+            "reports": True,
+            "notes": "Обнаружены незначительные дефекты, требуют доработки.",
+        },
+        "report_formats": ["xlsx"],
+    },
+    {
+        "project_id": "DEMO-PROJECT-008",
+        "template": "Demo Template: Workspace Readiness",
+        "brigade": "Demo Brigade Beta",
+        "inspector": "demo.inspector@example.com",
+        "status": CheckStatus.CANCELLED,
+        "started_offset": {"days": 6, "hours": 1},
+        "duration_hours": None,
+        "answers": {},
+        "report_formats": [],
+    },
+    {
+        "project_id": "DEMO-PROJECT-009",
+        "template": "Demo Template: Safety Walk",
+        "brigade": "Demo Brigade Gamma",
+        "inspector": "demo.inspector2@example.com",
+        "status": CheckStatus.IN_PROGRESS,
+        "planned_hours_ahead": 24,
+        "answers": {},
+        "report_formats": [],
+    },
+    {
+        "project_id": "DEMO-PROJECT-010",
+        "template": "Demo Template: Final Inspection",
+        "brigade": "Demo Brigade Delta",
+        "inspector": "demo.lead@example.com",
+        "status": CheckStatus.COMPLETED,
+        "started_offset": {"days": 10, "hours": 5},
+        "duration_hours": 3,
+        "answers": {
+            "finish-quality": True,
+            "photos": ["minio://quality-control/demo/final/delta2.jpg"],
+            "reports": True,
+            "notes": "Отличное качество выполнения работ.",
+        },
+        "report_formats": ["xlsx"],
+    },
 ]
 
 
@@ -594,13 +714,21 @@ async def _create_checks_and_reports(
         await db.flush()
         created_checks += 1
 
-        for fmt in payload["report_formats"]:
+        for i, fmt in enumerate(payload["report_formats"]):
             report_format = ReportFormatXLSX(fmt) if isinstance(fmt, str) else fmt
+            # Vary report statuses for demo
+            if i == 0 and len(payload["report_formats"]) > 1:
+                report_status = ReportStatus.GENERATING
+            elif i == len(payload["report_formats"]) - 1 and created_reports % 3 == 0:
+                report_status = ReportStatus.FAILED
+            else:
+                report_status = ReportStatus.READY
+            
             report = Report(
                 check_instance_id=check.id,
                 format=report_format,
                 file_key=f"demo/{check.id}/{report_format.value}",
-                status=ReportStatus.READY,
+                status=report_status,
                 generated_by=current_user.id,
                 author_id=current_user.id,
                 metadata={"source": "demo_seed"},
@@ -608,18 +736,30 @@ async def _create_checks_and_reports(
             db.add(report)
             await db.flush()
             created_reports += 1
-            try:
-                await _ensure_report_file(report, check)
-            except Exception as exc:
-                # Log silently; demo data generation should not fail due to missing storage
-                print(f"[demo] Failed to upload placeholder report {report.id}: {exc}")
+            if report_status == ReportStatus.READY:
+                try:
+                    await _ensure_report_file(report, check)
+                except Exception as exc:
+                    # Log silently; demo data generation should not fail due to missing storage
+                    print(f"[demo] Failed to upload placeholder report {report.id}: {exc}")
 
     if created_checks or created_reports:
         await db.commit()
 
+    # Get all created check instances for remarks
+    check_instances = []
+    if created_checks:
+        result = await db.execute(
+            select(CheckInstance)
+            .where(CheckInstance.project_id.in_([p["project_id"] for p in DEMO_CHECKS]))
+            .options(selectinload(CheckInstance.reports))
+        )
+        check_instances = result.scalars().all()
+
     return {
         "checks_created": created_checks,
         "reports_created": created_reports,
+        "check_instances": check_instances,
     }
 
 
@@ -676,11 +816,295 @@ async def _ensure_report_file(report_obj: Report, check: CheckInstance) -> None:
         print(f"[demo] Failed to upload report file {report_obj.file_key}: {exc}")
         # Don't raise - allow demo data generation to continue without storage files
 
-async def generate_demo_data(db: AsyncSession, current_user: User) -> Dict[str, Any]:
+async def _create_schedules(
+    db: AsyncSession,
+    *,
+    template_map: Dict[str, ChecklistTemplate],
+    user_map: Dict[str, User],
+    brigade_map: Dict[str, Brigade],
+) -> None:
+    """Create demo schedules for automated check creation."""
+    
+    safety_template = template_map.get("Demo Template: Safety Walk")
+    if not safety_template:
+        return
+    
+    inspector_users = [u for u in user_map.values() if "inspector" in u.email]
+    brigade_list = list(brigade_map.values())
+    
+    if not inspector_users or not brigade_list:
+        return
+    
+    # Check if schedules already exist
+    result = await db.execute(select(Schedule).where(Schedule.name.like("Demo Schedule%")))
+    existing = result.scalars().first()
+    if existing:
+        return
+    
+    final_template = template_map.get("Demo Template: Final Inspection")
+    
+    schedules = [
+        Schedule(
+            name="Demo Schedule: Daily Safety Walk",
+            template_id=safety_template.id,
+            cron_or_rrule="0 9 * * *",  # Every day at 9 AM
+            inspector_pool=[u.id for u in inspector_users[:2]],
+            brigade_pool=[b.id for b in brigade_list[:2]],
+            enabled=True,
+            timezone="UTC",
+        ),
+    ]
+    
+    if final_template:
+        schedules.append(
+            Schedule(
+                name="Demo Schedule: Weekly Final Inspection",
+                template_id=final_template.id,
+                cron_or_rrule="0 14 * * 5",  # Every Friday at 2 PM
+                inspector_pool=[inspector_users[0].id] if inspector_users else [],
+                brigade_pool=[b.id for b in brigade_list],
+                enabled=True,
+                timezone="UTC",
+            )
+        )
+    
+    for schedule in schedules:
+        if schedule.template_id:
+            db.add(schedule)
+    
+    await db.commit()
+
+
+async def _create_webhooks(db: AsyncSession) -> None:
+    """Create demo webhook subscriptions."""
+    result = await db.execute(select(WebhookSubscription).where(WebhookSubscription.url.like("%demo%")))
+    existing = result.scalars().first()
+    if existing:
+        return
+    
+    webhooks = [
+        WebhookSubscription(
+            event=WebhookEvent.CHECK_CREATED,
+            url="https://demo.example.com/webhooks/check-created",
+            secret="demo-secret-key-123",
+            active=True,
+        ),
+        WebhookSubscription(
+            event=WebhookEvent.CHECK_COMPLETED,
+            url="https://demo.example.com/webhooks/check-completed",
+            secret="demo-secret-key-456",
+            active=True,
+        ),
+        WebhookSubscription(
+            event=WebhookEvent.REPORT_READY,
+            url="https://demo.example.com/webhooks/report-ready",
+            secret="demo-secret-key-789",
+            active=True,
+        ),
+    ]
+    
+    for webhook in webhooks:
+        db.add(webhook)
+    
+    await db.commit()
+
+
+async def _create_period_summaries(
+    db: AsyncSession,
+    *,
+    brigade_map: Dict[str, Brigade],
+    user_map: Dict[str, User],
+) -> None:
+    """Create demo period summaries for analytics."""
+    today = date.today()
+    admin_user = user_map.get("demo.manager@example.com") or list(user_map.values())[0] if user_map else None
+    
+    if not admin_user:
+        return
+    
+    # Check if summaries already exist
+    result = await db.execute(
+        select(ReportPeriodSummary).where(ReportPeriodSummary.author_id == admin_user.id)
+    )
+    existing = result.scalars().first()
+    if existing:
+        return
+    
+    summaries = []
+    brigade_list = list(brigade_map.values())
+    
+    # Daily summaries for last 7 days
+    for days_ago in range(1, 8):
+        summary_date = today - timedelta(days=days_ago)
+        if brigade_list:
+            summaries.append(
+                ReportPeriodSummary(
+                    granularity=PeriodSummaryGranularity.DAY,
+                    period_start=summary_date,
+                    period_end=summary_date,
+                    brigade_id=brigade_list[0].id if brigade_list else None,
+                    author_id=admin_user.id,
+                    report_count=2 + days_ago % 3,
+                    summary_metrics={
+                        "avg_score": float(85 + days_ago % 10),
+                        "total_checks": 2 + days_ago % 3,
+                        "completed_checks": 1 + days_ago % 2,
+                    },
+                    delta_metrics={
+                        "score_delta": float((days_ago % 5) - 2),
+                        "check_count_delta": (days_ago % 3) - 1,
+                    } if days_ago > 1 else None,
+                )
+            )
+    
+    # Weekly summary for last week
+    week_start = today - timedelta(days=today.weekday() + 7)
+    week_end = week_start + timedelta(days=6)
+    if brigade_list:
+        summaries.append(
+            ReportPeriodSummary(
+                granularity=PeriodSummaryGranularity.WEEK,
+                period_start=week_start,
+                period_end=week_end,
+                brigade_id=brigade_list[0].id if brigade_list else None,
+                author_id=admin_user.id,
+                report_count=15,
+                summary_metrics={
+                    "avg_score": 87.5,
+                    "total_checks": 15,
+                    "completed_checks": 12,
+                },
+                delta_metrics={
+                    "score_delta": 2.3,
+                    "check_count_delta": 3,
+                },
+            )
+        )
+    
+    # Monthly summary for last month
+    month_start = date(today.year, today.month, 1) - timedelta(days=30)
+    month_end = date(today.year, today.month, 1) - timedelta(days=1)
+    if brigade_list:
+        summaries.append(
+            ReportPeriodSummary(
+                granularity=PeriodSummaryGranularity.MONTH,
+                period_start=month_start,
+                period_end=month_end,
+                brigade_id=brigade_list[0].id if brigade_list else None,
+                author_id=admin_user.id,
+                report_count=45,
+                summary_metrics={
+                    "avg_score": 86.2,
+                    "total_checks": 45,
+                    "completed_checks": 38,
+                },
+                delta_metrics={
+                    "score_delta": 1.8,
+                    "check_count_delta": 5,
+                },
+            )
+        )
+    
+    for summary in summaries:
+        db.add(summary)
+    
+    await db.commit()
+
+
+async def _create_report_generation_events(db: AsyncSession) -> None:
+    """Create demo report generation events."""
+    result = await db.execute(
+        select(ReportGenerationEvent).where(ReportGenerationEvent.event_type == ReportGenerationEventType.MANUAL)
+    )
+    existing = result.scalars().first()
+    if existing:
+        return
+    
+    # Get some reports to attach events to
+    reports_result = await db.execute(select(Report).limit(5))
+    reports = reports_result.scalars().all()
+    
+    if not reports:
+        return
+    
+    events = []
+    for i, report in enumerate(reports[:3]):
+        events.append(
+            ReportGenerationEvent(
+                report_id=report.id,
+                check_instance_id=report.check_instance_id,
+                event_type=ReportGenerationEventType.MANUAL if i == 0 else ReportGenerationEventType.SCHEDULED,
+                status=ReportGenerationStatus.SUCCESS,
+                triggered_by="demo_user",
+                payload={"demo": True},
+                completed_at=datetime.utcnow() - timedelta(hours=i),
+            )
+        )
+    
+    # Add one failed event
+    if len(reports) > 3:
+        events.append(
+            ReportGenerationEvent(
+                report_id=reports[3].id if len(reports) > 3 else reports[0].id,
+                check_instance_id=reports[3].check_instance_id if len(reports) > 3 else reports[0].check_instance_id,
+                event_type=ReportGenerationEventType.RETRY,
+                status=ReportGenerationStatus.FAILED,
+                triggered_by="demo_user",
+                payload={"demo": True, "retry_count": 1},
+                error_message="Demo error: Storage service temporarily unavailable",
+            )
+        )
+    
+    for event in events:
+        db.add(event)
+    
+    await db.commit()
+
+
+async def _create_remarks(db: AsyncSession, check_instances: List[CheckInstance]) -> None:
+    """Create demo remarks for check instances."""
+    if not check_instances:
+        return
+    
+    result = await db.execute(
+        select(RemarkEntry).where(RemarkEntry.source == "demo")
+    )
+    existing = result.scalars().first()
+    if existing:
+        return
+    
+    remarks = []
+    for i, check in enumerate(check_instances[:5]):
+        if check.status == CheckStatus.COMPLETED:
+            severity = RemarkSeverity.MEDIUM if i % 2 == 0 else RemarkSeverity.LOW
+            if i == 0:
+                severity = RemarkSeverity.HIGH
+            
+            remarks.append(
+                RemarkEntry(
+                    check_instance_id=check.id,
+                    department_id=check.department_id,
+                    brigade_id=check.brigade_id,
+                    severity=severity,
+                    message=f"Демо-замечание #{i+1}: {'Требуется внимание' if severity == RemarkSeverity.HIGH else 'Рекомендация по улучшению'}",
+                    raised_at=check.finished_at or check.started_at or datetime.utcnow(),
+                    source="demo",
+                    details={"demo": True, "check_project": check.project_id},
+                )
+            )
+    
+    for remark in remarks:
+        db.add(remark)
+    
+    if remarks:
+        await db.commit()
+
+
+async def generate_demo_data(db: AsyncSession, current_user: User, locale: str = "en") -> Dict[str, Any]:
     """Generate or reuse demo entities for showcasing the system."""
     counters = DemoDataResult()
 
-    required_roles = {"inspector", "crew_leader", "viewer"}
+    required_roles = {"inspector", "crew_leader", "viewer", "admin"}
     role_map = await ensure_roles(db, role_names=required_roles)
 
     user_map, counters.users_created = await _get_or_create_users(
@@ -705,7 +1129,14 @@ async def generate_demo_data(db: AsyncSession, current_user: User) -> Dict[str, 
     counters.checks_created = checks_reports["checks_created"]
     counters.reports_created = checks_reports["reports_created"]
 
-    return counters.as_payload()
+    # Create additional demo features
+    await _create_schedules(db, template_map=template_map, user_map=user_map, brigade_map=brigade_map)
+    await _create_webhooks(db)
+    await _create_period_summaries(db, brigade_map=brigade_map, user_map=user_map)
+    await _create_report_generation_events(db)
+    await _create_remarks(db, checks_reports.get("check_instances", []))
+
+    return counters.as_payload(locale=locale)
 
 
 async def reset_project_to_clean_state(db: AsyncSession) -> Dict[str, Any]:

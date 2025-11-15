@@ -360,15 +360,23 @@ class ReportBuilder:
     @staticmethod
     def _auto_size_columns(sheet) -> None:
         """Auto-fit column widths based on content."""
-        for column_cells in sheet.columns:
+        from openpyxl.utils import get_column_letter
+        from openpyxl.cell.cell import MergedCell
+        
+        for col_idx, column_cells in enumerate(sheet.columns, start=1):
             max_length = 0
-            column = column_cells[0].column_letter
+            column_letter = get_column_letter(col_idx)
+            
             for cell in column_cells:
+                # Skip merged cells - they don't have column_letter attribute
+                if isinstance(cell, MergedCell):
+                    continue
                 cell_value = str(cell.value) if cell.value is not None else ""
                 if len(cell_value) > max_length:
                     max_length = len(cell_value)
+            
             adjusted_width = min(max_length + 4, 60)
-            sheet.column_dimensions[column].width = adjusted_width
+            sheet.column_dimensions[column_letter].width = adjusted_width
 
 
 report_builder = ReportBuilder()

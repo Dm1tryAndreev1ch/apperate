@@ -86,7 +86,8 @@ def upgrade() -> None:
             bind.commit()
             
             # Now update existing records to use 'xlsx' (convert all old formats)
-            op.execute(sa.text("UPDATE reports SET format = 'xlsx'::reportformat WHERE format IS NOT NULL"))
+            # Use text conversion to avoid type mismatch
+            op.execute(sa.text("UPDATE reports SET format = 'xlsx'::text WHERE format IS NOT NULL"))
             
             # Create new enum first
             report_format_enum = postgresql.ENUM("xlsx", name="reportformatxlsx")
@@ -99,6 +100,9 @@ def upgrade() -> None:
             # Now convert to new enum type using explicit cast
             op.execute(sa.text("ALTER TABLE reports ALTER COLUMN format TYPE reportformatxlsx USING ('xlsx'::reportformatxlsx)"))
             op.execute(sa.text("DROP TYPE IF EXISTS reportformat"))
+        elif current_type and "reportformatxlsx" in current_type.lower():
+            # Already migrated, just ensure all values are 'xlsx'
+            op.execute(sa.text("UPDATE reports SET format = 'xlsx'::reportformatxlsx WHERE format IS NOT NULL AND format::text != 'xlsx'"))
 
     if "brigade_daily_scores" in tables:
         # Check existing columns

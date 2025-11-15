@@ -13,7 +13,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,9 @@ from app.models.report import Report, ReportStatus, ReportFormatXLSX
 from app.models.reporting import PeriodSummaryGranularity, ReportPeriodSummary
 from app.models.user import User
 from app.schemas.report import (
+    BulkDeleteReportsRequest,
+    BulkGenerateReportsRequest,
+    BulkGenerateReportsResponse,
     ChartImage,
     MonthlyCultureReportRequest,
     MonthlyCultureReportResponse,
@@ -43,6 +46,7 @@ from app.services.excel_export_service import generate_monthly_culture_report
 from app.services.report_builder import report_builder
 from app.services.report_dispatcher import report_dispatcher
 from app.services.storage_service import storage_service
+from app.localization.helpers import get_locale_from_request, get_translation
 
 router = APIRouter()
 
@@ -80,7 +84,7 @@ def _create_pie_chart(data: Dict[str, int], title: str) -> Optional[str]:
     return _figure_to_data_uri(fig)
 
 
-def _create_line_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) -> Optional[str]:
+def _create_line_chart(points: List[TimeSeriesPoint], title: str, ylabel: str, locale: str = "en") -> Optional[str]:
     """Render a line chart from a sequence of time series points."""
     if not points:
         return None
@@ -93,7 +97,7 @@ def _create_line_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) -
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.plot(labels, values, marker="o", linewidth=2)
     ax.set_title(title)
-    ax.set_xlabel("Дата")
+    ax.set_xlabel(get_translation("chart.date", locale))
     ax.set_ylabel(ylabel)
     ax.grid(True, linestyle="--", alpha=0.4)
     ax.tick_params(axis="x", rotation=45)
@@ -101,7 +105,7 @@ def _create_line_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) -
     return _figure_to_data_uri(fig)
 
 
-def _create_bar_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) -> Optional[str]:
+def _create_bar_chart(points: List[TimeSeriesPoint], title: str, ylabel: str, locale: str = "en") -> Optional[str]:
     """Render a bar chart from a sequence of time series points."""
     if not points:
         return None
@@ -114,7 +118,7 @@ def _create_bar_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) ->
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.bar(labels, values, color="#4a90e2")
     ax.set_title(title)
-    ax.set_xlabel("Бригада")
+    ax.set_xlabel(get_translation("chart.brigade", locale))
     ax.set_ylabel(ylabel)
     ax.set_ylim(0, max(values) * 1.1 if values else 1)
     ax.grid(axis="y", linestyle="--", alpha=0.3)
@@ -129,43 +133,89 @@ def _create_bar_chart(points: List[TimeSeriesPoint], title: str, ylabel: str) ->
     summary="Generate monthly culture Excel report",
 )
 async def create_monthly_culture_report(
-    payload: MonthlyCultureReportRequest = Body(default_factory=MonthlyCultureReportRequest),
+    request: Request,
+    payload: Optional[MonthlyCultureReportRequest] = Body(default=None),
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(require_permission(Permission.REPORT_EXPORT)),
 ):
-    """Generate Excel report aggregating brigade culture metrics."""
-    today = datetime.utcnow().date()
-    year = payload.year or today.year
-    month_number = payload.month or today.month
-
+    """
+    Generate Excel report for monthly brigade culture metrics.
+    
+    Accepts optional JSON body. If body is empty or None, uses current month/year.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        month_date = date(year, month_number, 1)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Некорректные значения года или месяца.",
-        ) from exc
+        # Handle empty or None payload
+        if payload is None:
+            payload = MonthlyCultureReportRequest()
+        
+        # Get current date for defaults
+        today = datetime.utcnow().date()
+        report_year = payload.year if payload.year is not None else today.year
+        report_month = payload.month if payload.month is not None else today.month
+        expires_in = payload.expires_in if payload.expires_in is not None else 3600
+        
+        logger.info(f"Generating Excel report: year={report_year}, month={report_month}, brigades={len(payload.brigade_ids) if payload.brigade_ids else 'all'}")
+        
+        # Validate month
+        if not (1 <= report_month <= 12):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Месяц должен быть от 1 до 12, получено: {report_month}",
+            )
+        
+        # Create month date
+        try:
+            month_date = date(report_year, report_month, 1)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Некорректная дата: год={report_year}, месяц={report_month}",
+            ) from exc
 
-    result = await generate_monthly_culture_report(
-        db,
-        month=month_date,
-        brigade_ids=payload.brigade_ids,
-        expires_in=payload.expires_in,
-    )
-    return {
-        **result,
-        "month": month_date,
-    }
+        # Generate report
+        logger.info(f"Starting report generation for {month_date}")
+        result = await generate_monthly_culture_report(
+            db,
+            month=month_date,
+            brigade_ids=payload.brigade_ids,
+            expires_in=expires_in,
+        )
+        logger.info(f"Report generated successfully: {result.get('file_key')}")
+        
+        response = MonthlyCultureReportResponse(
+            file_key=result["file_key"],
+            download_url=result["download_url"],
+            filename=result["filename"],
+            month=month_date,
+        )
+        logger.info(f"Returning response with download_url: {result.get('download_url')[:50]}...")
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:
+        import traceback
+        error_detail = str(exc)
+        logger.error(f"Error generating Excel report: {error_detail}", exc_info=True)
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Ошибка при генерации Excel отчёта: {error_detail}",
+        ) from exc
 
 
 @router.post("/generate/{check_instance_id}", response_model=ReportResponse)
 async def generate_report(
     check_instance_id: UUID,
+    request: Request,
     trigger_bitrix: bool = Query(default=True, description="Trigger Bitrix ticket creation for alerts"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.REPORT_GENERATE)),
 ):
     """Generate a new Excel report for a check instance."""
+    locale = get_locale_from_request(request)
     # Load check instance
     result = await db.execute(
         select(CheckInstance)
@@ -174,12 +224,12 @@ async def generate_report(
     )
     check_instance = result.scalar_one_or_none()
     if not check_instance:
-        raise NotFoundError("Check instance not found")
+        raise NotFoundError(get_translation("errors.check_not_found", locale))
 
     if check_instance.status != CheckStatus.COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only generate reports for completed checks",
+            detail=get_translation("errors.report_only_completed", locale),
         )
 
     # Generate report using dispatcher
@@ -191,6 +241,48 @@ async def generate_report(
     )
 
     return report_obj
+
+
+@router.post("/{report_id}/regenerate", response_model=ReportResponse)
+async def regenerate_report(
+    report_id: UUID,
+    request: Request,
+    trigger_bitrix: bool = Query(default=False, description="Trigger Bitrix ticket creation for alerts"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(Permission.REPORT_GENERATE)),
+):
+    """Regenerate a failed report."""
+    locale = get_locale_from_request(request)
+    
+    # Get report
+    result = await db.execute(
+        select(Report).where(Report.id == report_id)
+    )
+    report_obj = result.scalar_one_or_none()
+    if not report_obj:
+        raise NotFoundError(get_translation("errors.report_not_found", locale))
+    
+    # Regenerate using dispatcher
+    regenerated_report = await report_dispatcher.regenerate_report(
+        db,
+        report=report_obj,
+        author=current_user,
+        trigger_bitrix=trigger_bitrix,
+    )
+    
+    # Construct response explicitly to handle metadata_json -> metadata mapping
+    report_dict = {
+        "id": regenerated_report.id,
+        "check_instance_id": regenerated_report.check_instance_id,
+        "format": regenerated_report.format,
+        "file_key": regenerated_report.file_key,
+        "status": regenerated_report.status,
+        "created_at": regenerated_report.created_at,
+        "generated_by": regenerated_report.generated_by,
+        "author_id": regenerated_report.author_id,
+        "metadata": regenerated_report.metadata_json if regenerated_report.metadata_json is not None else {},
+    }
+    return ReportResponse(**report_dict)
 
 
 @router.get("", response_model=List[ReportResponse])
@@ -245,16 +337,34 @@ async def list_reports(
     result = await db.execute(query)
     reports = result.scalars().all()
 
-    return reports
+    # Convert to response format, handling metadata_json field
+    response_reports = []
+    for r in reports:
+        report_dict = {
+            "id": r.id,
+            "check_instance_id": r.check_instance_id,
+            "format": r.format,
+            "file_key": r.file_key,
+            "status": r.status,
+            "created_at": r.created_at,
+            "generated_by": r.generated_by,
+            "author_id": r.author_id,
+            "metadata": r.metadata_json if r.metadata_json is not None else {},
+        }
+        response_reports.append(ReportResponse(**report_dict))
+    
+    return response_reports
 
 
 @router.get("/analytics", response_model=ReportAnalyticsResponse)
 async def report_analytics(
+    request: Request,
     days: int = Query(default=14, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.REPORT_VIEW)),
 ):
     """Return aggregated analytics for dashboards."""
+    locale = get_locale_from_request(request)
     to_date = datetime.utcnow().date()
     from_date = to_date - timedelta(days=days - 1)
 
@@ -481,10 +591,12 @@ async def export_period_summary(
 @router.get("/{report_id}", response_model=ReportResponse)
 async def get_report(
     report_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get a report by ID."""
+    locale = get_locale_from_request(request)
     result = await db.execute(
         select(Report)
         .where(Report.id == report_id)
@@ -492,29 +604,47 @@ async def get_report(
     )
     report_obj = result.scalar_one_or_none()
     if not report_obj:
-        raise NotFoundError("Report not found")
-    return report_obj
+        raise NotFoundError(get_translation("errors.report_file_not_found", locale))
+    
+    # Convert to response format, handling metadata_json field
+    report_dict = {
+        "id": report_obj.id,
+        "check_instance_id": report_obj.check_instance_id,
+        "format": report_obj.format,
+        "file_key": report_obj.file_key,
+        "status": report_obj.status,
+        "created_at": report_obj.created_at,
+        "generated_by": report_obj.generated_by,
+        "author_id": report_obj.author_id,
+        "metadata": report_obj.metadata_json if report_obj.metadata_json is not None else {},
+    }
+    return ReportResponse(**report_dict)
 
 
 @router.get("/{report_id}/download", response_model=ReportDownloadResponse)
 async def download_report(
     report_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.REPORT_DOWNLOAD)),
 ):
     """Get presigned URL for downloading a report."""
+    locale = get_locale_from_request(request)
     report_obj = await report.get(db, id=report_id)
     if not report_obj:
-        raise NotFoundError("Report not found")
+        raise NotFoundError(get_translation("errors.report_file_not_found", locale))
 
     if report_obj.status != ReportStatus.READY:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Report is not ready. Status: {report_obj.status}",
+            detail=get_translation("errors.report_not_ready", locale, status=str(report_obj.status)),
         )
 
     if not report_obj.file_key:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=get_translation("errors.report_file_not_found", locale)
+        )
 
     # Generate presigned URL from storage service
     download_url = storage_service.generate_download_url(report_obj.file_key, expires_in=3600)
@@ -524,28 +654,33 @@ async def download_report(
 @router.get("/{report_id}/file", name="download_report_file")
 async def download_report_file(
     report_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.REPORT_DOWNLOAD)),
 ):
     """Stream report file through the API (Excel-only)."""
+    locale = get_locale_from_request(request)
     report_obj = await report.get(db, id=report_id)
     if not report_obj:
-        raise NotFoundError("Report not found")
+        raise NotFoundError(get_translation("errors.report_file_not_found", locale))
 
     if report_obj.status != ReportStatus.READY:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Report is not ready. Status: {report_obj.status}",
+            detail=get_translation("errors.report_not_ready", locale, status=str(report_obj.status)),
         )
 
     if not report_obj.file_key:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=get_translation("errors.report_file_not_found", locale)
+        )
 
     # Ensure format is XLSX
     if report_obj.format != ReportFormatXLSX.XLSX:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel (XLSX) reports are supported",
+            detail=get_translation("errors.only_xlsx_supported", locale),
         )
 
     try:
@@ -553,7 +688,7 @@ async def download_report_file(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Report file unavailable: {exc}",
+            detail=get_translation("errors.report_file_unavailable", locale, detail=str(exc)),
         ) from exc
 
     body = s3_object["Body"]
@@ -579,10 +714,12 @@ async def download_report_file(
 @router.get("/checks/{check_id}/logs")
 async def get_check_logs(
     check_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """Get check instance logs in HTML-safe JSON format for web viewing."""
+    locale = get_locale_from_request(request)
     result = await db.execute(
         select(CheckInstance)
         .where(CheckInstance.id == check_id)
@@ -590,7 +727,7 @@ async def get_check_logs(
     )
     check_instance = result.scalar_one_or_none()
     if not check_instance:
-        raise NotFoundError("Check instance not found")
+        raise NotFoundError(get_translation("errors.check_not_found", locale))
 
     # Build log structure
     template_schema = check_instance.template.schema if check_instance.template else {}
@@ -598,9 +735,10 @@ async def get_check_logs(
     comments = check_instance.comments or {}
     media_keys = check_instance.media_keys or []
 
+    locale = get_locale_from_request(request)
     log_sections = []
     for section in template_schema.get("sections", []):
-        section_name = section.get("title") or section.get("name", "Без названия")
+        section_name = section.get("title") or section.get("name", get_translation("common.no_name", locale))
         section_items = []
 
         for question in section.get("questions", []):
@@ -626,8 +764,8 @@ async def get_check_logs(
 
     return {
         "check_id": str(check_instance.id),
-        "template_name": check_instance.template.name if check_instance.template else "Unknown",
-        "inspector": check_instance.inspector.full_name if check_instance.inspector else "Unknown",
+        "template_name": check_instance.template.name if check_instance.template else get_translation("common.unknown", locale),
+        "inspector": check_instance.inspector.full_name if check_instance.inspector else get_translation("common.unknown", locale),
         "status": check_instance.status.value if hasattr(check_instance.status, "value") else str(check_instance.status),
         "started_at": check_instance.started_at.isoformat() if check_instance.started_at else None,
         "finished_at": check_instance.finished_at.isoformat() if check_instance.finished_at else None,
@@ -637,3 +775,108 @@ async def get_check_logs(
         "sections": log_sections,
         "audit_trail": check_instance.audit or {},
     }
+
+
+@router.delete("/bulk", response_model=Dict[str, int])
+async def bulk_delete_reports(
+    request: Request,
+    payload: BulkDeleteReportsRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(Permission.REPORT_GENERATE)),
+):
+    """Delete multiple reports by IDs."""
+    locale = get_locale_from_request(request)
+    
+    deleted_count = 0
+    for report_id in payload.report_ids:
+        try:
+            report_obj = await report.get(db, id=report_id)
+            if report_obj:
+                # Delete file from storage if exists
+                if report_obj.file_key:
+                    try:
+                        await asyncio.to_thread(storage_service.delete_file, report_obj.file_key)
+                    except Exception:
+                        pass  # Ignore storage errors
+                
+                await report.remove(db, id=report_id)
+                deleted_count += 1
+        except Exception:
+            pass  # Continue on errors
+    
+    await db.commit()
+    return {"deleted_count": deleted_count}
+
+
+@router.post("/generate-bulk", response_model=BulkGenerateReportsResponse)
+async def bulk_generate_reports(
+    request: Request,
+    payload: BulkGenerateReportsRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission(Permission.REPORT_GENERATE)),
+):
+    """Generate reports for multiple check instances."""
+    locale = get_locale_from_request(request)
+    
+    success_count = 0
+    failed_count = 0
+    reports = []
+    errors = []
+    
+    for check_id in payload.check_instance_ids:
+        try:
+            # Load check instance
+            result = await db.execute(
+                select(CheckInstance)
+                .where(CheckInstance.id == check_id)
+                .options(selectinload(CheckInstance.template), selectinload(CheckInstance.inspector), selectinload(CheckInstance.brigade))
+            )
+            check_instance = result.scalar_one_or_none()
+            
+            if not check_instance:
+                failed_count += 1
+                errors.append({"check_id": str(check_id), "error": "Check instance not found"})
+                continue
+            
+            if check_instance.status != CheckStatus.COMPLETED:
+                failed_count += 1
+                errors.append({"check_id": str(check_id), "error": f"Check status is {check_instance.status}, must be COMPLETED"})
+                continue
+            
+            # Generate report
+            report_obj = await report_dispatcher.generate_and_dispatch_report(
+                db,
+                check_instance=check_instance,
+                author=current_user,
+                trigger_bitrix=payload.trigger_bitrix,
+            )
+            
+            # Convert to response format
+            report_dict = {
+                "id": report_obj.id,
+                "check_instance_id": report_obj.check_instance_id,
+                "format": report_obj.format,
+                "file_key": report_obj.file_key,
+                "status": report_obj.status,
+                "created_at": report_obj.created_at,
+                "generated_by": report_obj.generated_by,
+                "author_id": report_obj.author_id,
+                "metadata": report_obj.metadata_json if report_obj.metadata_json is not None else {},
+            }
+            reports.append(ReportResponse(**report_dict))
+            success_count += 1
+            
+        except Exception as e:
+            failed_count += 1
+            error_msg = str(e)
+            errors.append({"check_id": str(check_id), "error": error_msg})
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to generate report for check {check_id}: {error_msg}")
+    
+    return BulkGenerateReportsResponse(
+        success_count=success_count,
+        failed_count=failed_count,
+        reports=reports,
+        errors=errors,
+    )

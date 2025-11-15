@@ -2,7 +2,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,16 +14,26 @@ from app.database import get_db
 from app.models.user import User
 from app.utils.permissions import has_permission
 from app.utils.security import decode_token
+from app.localization.helpers import get_locale_from_request, get_translation
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Get current authenticated user from JWT token."""
-    credentials_exception = UnauthorizedError("Could not validate credentials")
+    # Request is optional for backward compatibility, but FastAPI will inject it if available
+    try:
+        locale = get_locale_from_request(request) if request is not None else "en"
+    except (AttributeError, TypeError):
+        locale = "en"
+    credentials_exception = UnauthorizedError(
+        get_translation("errors.could_not_validate_credentials", locale),
+        locale=locale
+    )
 
     try:
         payload = decode_token(token)
@@ -52,17 +62,28 @@ async def get_current_user(
         raise credentials_exception
 
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=get_translation("errors.user_inactive", locale)
+        )
 
     return user
 
 
 async def get_current_active_user(
+    request: Request = None,
     current_user: User = Depends(get_current_user),
 ) -> User:
     """Get current active user."""
+    try:
+        locale = get_locale_from_request(request) if request is not None else "en"
+    except (AttributeError, TypeError):
+        locale = "en"
     if not current_user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=get_translation("errors.user_inactive", locale)
+        )
     return current_user
 
 
@@ -70,10 +91,18 @@ def require_permission(permission: Permission):
     """Dependency factory for requiring a specific permission."""
 
     async def permission_checker(
+        request: Request = None,
         current_user: User = Depends(get_current_active_user),
     ) -> User:
+        try:
+            locale = get_locale_from_request(request) if request is not None else "en"
+        except (AttributeError, TypeError):
+            locale = "en"
         if not has_permission(current_user, permission):
-            raise ForbiddenError(f"Permission required: {permission.value}")
+            raise ForbiddenError(
+                get_translation("errors.permission_required", locale, permission=permission.value),
+                locale=locale
+            )
         return current_user
 
     return permission_checker

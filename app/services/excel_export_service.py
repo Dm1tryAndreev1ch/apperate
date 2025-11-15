@@ -1,4 +1,4 @@
-"""Services for exporting analytics to Excel."""
+"""Simplified service for exporting analytics to Excel."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Dict, Iterable, List, Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from dateutil.relativedelta import relativedelta
 from openpyxl import Workbook
@@ -39,18 +39,24 @@ class MonthlyBrigadeMetrics:
         return self.current_avg - self.previous_avg
 
 
-async def _fetch_brigades(db: AsyncSession) -> List[Brigade]:
-    result = await db.execute(select(Brigade).order_by(Brigade.name))
+async def _fetch_brigades(db: AsyncSession, brigade_ids: Optional[Iterable[UUID]] = None) -> List[Brigade]:
+    """Fetch brigades, optionally filtered by IDs."""
+    stmt = select(Brigade).order_by(Brigade.name)
+    if brigade_ids:
+        brigade_id_list = list(brigade_ids)
+        stmt = stmt.where(Brigade.id.in_(brigade_id_list))
+    result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
 async def _fetch_scores(
     db: AsyncSession,
     *,
-    brigade_ids: Iterable,
+    brigade_ids: List[UUID],
     start_date: date,
     end_date: date,
 ) -> Dict[str, Dict[date, Decimal]]:
+    """Fetch daily scores for brigades in date range."""
     if not brigade_ids:
         return {}
 
@@ -76,10 +82,11 @@ async def _fetch_scores(
 async def _fetch_month_average(
     db: AsyncSession,
     *,
-    brigade_ids: Iterable,
+    brigade_ids: List[UUID],
     start_date: date,
     end_date: date,
 ) -> Dict[str, Optional[Decimal]]:
+    """Fetch average score for brigades in date range."""
     if not brigade_ids:
         return {}
 
@@ -106,8 +113,9 @@ async def _collect_monthly_metrics(
     db: AsyncSession,
     *,
     month: date,
-    brigade_filter: Optional[Iterable[str]] = None,
+    brigade_ids: Optional[Iterable[UUID]] = None,
 ) -> List[MonthlyBrigadeMetrics]:
+    """Collect monthly metrics for brigades."""
     month_start = month.replace(day=1)
     _, days_in_month = monthrange(month_start.year, month_start.month)
     month_end = month_start + timedelta(days=days_in_month - 1)
@@ -116,31 +124,21 @@ async def _collect_monthly_metrics(
     _, prev_days = monthrange(prev_month_start.year, prev_month_start.month)
     prev_month_end = prev_month_start + timedelta(days=prev_days - 1)
 
-    brigades = await _fetch_brigades(db)
-    if brigade_filter:
-        selected = {str(b_id) for b_id in brigade_filter}
-        brigades = [brig for brig in brigades if str(brig.id) in selected]
+    # Fetch brigades
+    brigades = await _fetch_brigades(db, brigade_ids=brigade_ids)
+    if not brigades:
+        return []
 
-    brigade_ids = [brig.id for brig in brigades]
-    daily_scores = await _fetch_scores(
-        db,
-        brigade_ids=brigade_ids,
-        start_date=month_start,
-        end_date=month_end,
-    )
-    current_avg = await _fetch_month_average(
-        db,
-        brigade_ids=brigade_ids,
-        start_date=month_start,
-        end_date=month_end,
-    )
-    previous_avg = await _fetch_month_average(
-        db,
-        brigade_ids=brigade_ids,
-        start_date=prev_month_start,
-        end_date=prev_month_end,
+    brigade_id_list = [brig.id for brig in brigades]
+
+    # Fetch data in parallel
+    daily_scores, current_avg, previous_avg = await asyncio.gather(
+        _fetch_scores(db, brigade_ids=brigade_id_list, start_date=month_start, end_date=month_end),
+        _fetch_month_average(db, brigade_ids=brigade_id_list, start_date=month_start, end_date=month_end),
+        _fetch_month_average(db, brigade_ids=brigade_id_list, start_date=prev_month_start, end_date=prev_month_end),
     )
 
+    # Build metrics
     metrics: List[MonthlyBrigadeMetrics] = []
     for brigade in brigades:
         daily_map = {
@@ -163,6 +161,7 @@ def _build_workbook(
     metrics: List[MonthlyBrigadeMetrics],
     month: date,
 ) -> BytesIO:
+    """Build Excel workbook with monthly metrics."""
     month_start = month.replace(day=1)
     _, days_in_month = monthrange(month_start.year, month_start.month)
 
@@ -170,15 +169,18 @@ def _build_workbook(
     ws = wb.active
     ws.title = "Аналитика"
 
+    # Header styles
     header_fill = PatternFill(start_color="173F5F", end_color="173F5F", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True)
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    ws["A1"] = "Аналитика по культуре производства за месяц"
+    # Title
+    ws["A1"] = f"Аналитика по культуре производства за {month_start.strftime('%B %Y')}"
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=days_in_month + 4)
     ws["A1"].font = Font(bold=True, size=14)
     ws["A1"].alignment = Alignment(horizontal="center")
 
+    # Headers
     headers: List[str] = ["Структурное подразделение"]
     headers.extend([str(day) for day in range(1, days_in_month + 1)])
     headers.extend(["Итог месяца", "Предыдущий месяц", "Динамика"])
@@ -191,6 +193,7 @@ def _build_workbook(
         cell.alignment = header_alignment
         ws.column_dimensions[get_column_letter(col_idx)].width = 15 if col_idx == 1 else 10
 
+    # Data rows
     for metric in metrics:
         row = [metric.brigade_name]
         for day in range(1, days_in_month + 1):
@@ -202,12 +205,14 @@ def _build_workbook(
         row.append(float(delta) if delta is not None else None)
         ws.append(row)
 
+    # Format numbers
     for row in ws.iter_rows(min_row=3, min_col=2, max_col=days_in_month + 4):
         for cell in row:
             if cell.value is not None:
                 cell.number_format = NUMBER_FORMAT
                 cell.alignment = Alignment(horizontal="center")
 
+    # Save to buffer
     buffer = BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -218,28 +223,45 @@ async def generate_monthly_culture_report(
     db: AsyncSession,
     *,
     month: date,
-    brigade_ids: Optional[Iterable[str]] = None,
+    brigade_ids: Optional[Iterable[UUID]] = None,
     expires_in: int = 3600,
 ) -> Dict[str, str]:
-    """Generate Excel report for monthly brigade culture metrics."""
-    metrics = await _collect_monthly_metrics(db, month=month, brigade_filter=brigade_ids)
-    workbook_io = await asyncio.to_thread(_build_workbook, metrics=metrics, month=month)
+    """
+    Generate Excel report for monthly brigade culture metrics.
+    
+    Returns:
+        Dict with file_key, download_url, and filename
+    """
+    try:
+        # Collect metrics
+        metrics = await _collect_monthly_metrics(db, month=month, brigade_ids=brigade_ids)
+        
+        # Build workbook
+        workbook_io = await asyncio.to_thread(_build_workbook, metrics=metrics, month=month)
+        
+        # Ensure buffer is at start
+        workbook_io.seek(0)
 
-    file_key = f"reports/monthly_culture/{month.year}-{month.month:02d}-{uuid4()}.xlsx"
-    content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    await asyncio.to_thread(
-        storage_service.upload_fileobj,
-        workbook_io,
-        file_key,
-        content_type,
-    )
+        # Generate file key
+        file_key = f"reports/monthly_culture/{month.year}-{month.month:02d}-{uuid4()}.xlsx"
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        
+        # Upload to storage
+        await asyncio.to_thread(
+            storage_service.upload_fileobj,
+            workbook_io,
+            file_key,
+            content_type,
+        )
 
-    download_url = storage_service.generate_download_url(file_key, expires_in=expires_in)
+        # Generate download URL
+        download_url = storage_service.generate_download_url(file_key, expires_in=expires_in)
 
-    filename = f"monthly-culture-{month.year}-{month.month:02d}.xlsx"
-    return {
-        "file_key": file_key,
-        "download_url": download_url,
-        "filename": filename,
-    }
-
+        filename = f"monthly-culture-{month.year}-{month.month:02d}.xlsx"
+        return {
+            "file_key": file_key,
+            "download_url": download_url,
+            "filename": filename,
+        }
+    except Exception as e:
+        raise Exception(f"Ошибка при генерации Excel отчёта: {str(e)}") from e
